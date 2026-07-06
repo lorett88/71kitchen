@@ -1122,14 +1122,16 @@ function renderPurModal(){
       </div>
     </div>`;
   };
+  const keepP=(id,def)=>{const el=document.getElementById(id);return el!=null?el.value:def;};
+  const vSup=keepP('pu_sup',''), vType=keepP('pu_type','cash'), vDue=keepP('pu_due',''), vRet=keepP('pu_ret','0'), vProof=keepP('pu_proof',''), vNote=keepP('pu_note','');
   document.getElementById('pur-body').innerHTML=`<h2 style="margin-bottom:12px">Pembelian Baru</h2>
-   <div class="grid2">${field('Supplier',`<select id="pu_sup"><option value="">— tanpa supplier —</option>${S3.sup.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select>`)}
-   ${field('Tipe bayar',`<select id="pu_type" onchange="document.getElementById('pu_due_w').style.display=this.value==='tempo'?'block':'none'"><option value="cash">Tunai</option><option value="tempo">Tempo</option></select>`)}</div>
-   <div id="pu_due_w" style="display:none">${field('Jatuh tempo',`<input id="pu_due" type="date">`)}</div>
+   <div class="grid2">${field('Supplier',`<select id="pu_sup"><option value="">— tanpa supplier —</option>${S3.sup.map(s=>`<option value="${s.id}" ${vSup===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>`)}
+   ${field('Tipe bayar',`<select id="pu_type" onchange="document.getElementById('pu_due_w').style.display=this.value==='tempo'?'block':'none'"><option value="cash" ${vType==='cash'?'selected':''}>Tunai</option><option value="tempo" ${vType==='tempo'?'selected':''}>Tempo</option></select>`)}</div>
+   <div id="pu_due_w" style="display:${vType==='tempo'?'block':'none'}">${field('Jatuh tempo',`<input id="pu_due" type="date" value="${esc(vDue)}">`)}</div>
    <div style="font-size:13px;color:var(--muted);margin:8px 0">Pilih barang, lalu isi <b>Jumlah beli</b> dan <b>Harga satuan</b>-nya. Jumlah boleh desimal (mis. 0,5 kg).</div>${PURLINES.map(line).join('')}
    <button class="btn ghost sm" onclick="PURLINES.push({cat:'raw',item_id:'',qty:1,unit_cost:0});renderPurModal()">+ Tambah item</button>
-   <div class="grid2" style="margin-top:10px">${field('Sisa uang kembali (Rp)',`<input id="pu_ret" type="text" inputmode="numeric" value="0">`)}${field('Bukti (URL, opsional)',`<input id="pu_proof">`)}</div>
-   ${field('Catatan',`<input id="pu_note">`)}
+   <div class="grid2" style="margin-top:10px">${field('Sisa uang kembali (Rp)',`<input id="pu_ret" type="text" inputmode="numeric" value="${esc(vRet)}">`)}${field('Bukti (URL, opsional)',`<input id="pu_proof" value="${esc(vProof)}">`)}</div>
+   ${field('Catatan',`<input id="pu_note" value="${esc(vNote)}">`)}
    <div style="display:flex;justify-content:space-between;font-weight:600;margin-top:8px"><span>Total</span><span>${rp(total)}</span></div>
    <div id="pu-msg" class="msg"></div>
    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="purSave()">Simpan (minta otorisasi)</button></div>`;
@@ -1297,18 +1299,20 @@ async function viewBooking(){
 }
 function bkNew(){ BKLINES=[{product_id:'',qty:1}]; openModal('<div id="bk-body"></div>'); renderBkModal(); }
 function renderBkModal(){
+  const keep=(id,def)=>{const el=document.getElementById(id);return el!=null?el.value:def;};
+  const vName=keep('bk_name',''), vPhone=keep('bk_phone',''), vDate=keep('bk_date',''), vPax=keep('bk_pax','1'), vNote=keep('bk_note',''), vDp=keep('bk_dp','0'), vDpm=keep('bk_dpm','tunai');
   const total=BKLINES.reduce((s,l)=>{const p=BKPRODS.find(x=>x.id===l.product_id);return s+(p?Number(p.price_dinein):0)*Number(l.qty||0);},0);
   const line=(l,i)=>`<div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
     <select onchange="BKLINES[${i}].product_id=this.value;renderBkModal()" style="flex:1"><option value="">— pilih menu —</option>${BKPRODS.map(p=>`<option value="${p.id}" ${l.product_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
     <input type="text" inputmode="decimal" value="${l.qty||''}" style="width:70px" onchange="BKLINES[${i}].qty=qnum(this.value);renderBkModal()">
     ${BKLINES.length>1?`<button class="btn ghost sm" onclick="BKLINES.splice(${i},1);renderBkModal()">✕</button>`:''}</div>`;
   document.getElementById('bk-body').innerHTML=`<h2 style="margin-bottom:12px">Booking Baru</h2>
-   <div class="grid2">${field('Nama customer',`<input id="bk_name">`)}${field('No HP',`<input id="bk_phone">`)}
-   ${field('Tanggal acara',`<input id="bk_date" type="date">`)}${field('Jumlah orang (pax)',`<input id="bk_pax" type="text" inputmode="numeric" value="1">`)}</div>
-   ${field('Keterangan acara (detail acara, opsional)',`<textarea id="bk_note" rows="2" style="width:100%;resize:vertical;font-family:inherit" placeholder="mis. Ulang tahun, dekor merah, mulai jam 18.00, alergi udang"></textarea>`)}
+   <div class="grid2">${field('Nama customer',`<input id="bk_name" value="${esc(vName)}">`)}${field('No HP',`<input id="bk_phone" value="${esc(vPhone)}">`)}
+   ${field('Tanggal acara',`<input id="bk_date" type="date" value="${esc(vDate)}">`)}${field('Jumlah orang (pax)',`<input id="bk_pax" type="text" inputmode="numeric" value="${esc(vPax)}">`)}</div>
+   ${field('Keterangan acara (detail acara, opsional)',`<textarea id="bk_note" rows="2" style="width:100%;resize:vertical;font-family:inherit" placeholder="mis. Ulang tahun, dekor merah, mulai jam 18.00, alergi udang">${esc(vNote)}</textarea>`)}
    <div style="font-size:13px;color:var(--muted);margin:6px 0">Menu dipesan</div>${BKLINES.map(line).join('')}
    <button class="btn ghost sm" onclick="BKLINES.push({product_id:'',qty:1});renderBkModal()">+ Tambah menu</button>
-   <div class="grid2" style="margin-top:10px">${field('DP (Rp)',`<input id="bk_dp" type="text" inputmode="numeric" value="0">`)}${field('Metode DP',`<select id="bk_dpm"><option value="tunai">Tunai</option><option value="qris">QRIS</option><option value="transfer">Transfer</option><option value="edc">EDC</option></select>`)}</div>
+   <div class="grid2" style="margin-top:10px">${field('DP (Rp)',`<input id="bk_dp" type="text" inputmode="numeric" value="${esc(vDp)}">`)}${field('Metode DP',`<select id="bk_dpm">${['tunai','qris','transfer','edc'].map(m=>`<option value="${m}" ${vDpm===m?'selected':''}>${m==='tunai'?'Tunai':m==='qris'?'QRIS':m==='transfer'?'Transfer':'EDC'}</option>`).join('')}</select>`)}</div>
    <div style="display:flex;justify-content:space-between;font-weight:600;margin-top:8px"><span>Total</span><span>${rp(total)}</span></div>
    <div id="bk-msg" class="msg"></div>
    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="bkSave()">Simpan booking</button></div>`;
