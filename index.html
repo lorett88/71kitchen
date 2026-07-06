@@ -116,10 +116,7 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
     table{white-space:nowrap}
     .cards{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
   }
-  #rotate-lock{display:none}
-  @media (hover:none) and (pointer:coarse) and (orientation:landscape){
-    #rotate-lock{display:flex;position:fixed;inset:0;z-index:99999;background:var(--teal);color:#fff;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:28px}
-  }
+  #rotate-lock{display:none;position:fixed;inset:0;z-index:99999;background:var(--teal);color:#fff;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:28px}
 </style>
 </head>
 <body>
@@ -1826,6 +1823,23 @@ async function compoAddBundle(){
 async function compoDelBundle(id){ await sb.from('bundle_items').delete().eq('id',id); renderCompo(); }
 
 try{ if(screen.orientation&&screen.orientation.lock){ screen.orientation.lock('portrait').catch(()=>{}); } }catch(e){}
+/* Penjaga portrait untuk HP & tablet (JS, tidak bergantung media query) */
+(function(){
+  const ua=navigator.userAgent;
+  const isTouchDev=/Android|iPhone|iPod|iPad|Mobile|Tablet/i.test(ua)
+    || (/Macintosh/.test(ua)&&navigator.maxTouchPoints>1)          /* iPad mode desktop */
+    || (/Linux/.test(ua)&&!/Windows/.test(ua)&&navigator.maxTouchPoints>0); /* tablet Android mode desktop */
+  function isLand(){
+    try{ if(screen.orientation&&screen.orientation.type) return screen.orientation.type.indexOf('landscape')===0; }catch(e){}
+    if(typeof window.orientation==='number') return Math.abs(window.orientation)===90;
+    return window.innerWidth>window.innerHeight;
+  }
+  function upd(){ const el=document.getElementById('rotate-lock'); if(!el)return; el.style.display=(isTouchDev&&isLand())?'flex':'none'; }
+  window.addEventListener('resize',upd);
+  window.addEventListener('orientationchange',upd);
+  try{ if(screen.orientation&&screen.orientation.addEventListener) screen.orientation.addEventListener('change',upd); }catch(e){}
+  upd();
+})();
 if(window.supabase){ boot(); }
 else {
   document.body.innerHTML='<div style="font-family:system-ui,-apple-system,sans-serif;max-width:380px;margin:16vh auto 0;text-align:center;padding:24px;color:#1f2421">'
