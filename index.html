@@ -27,6 +27,8 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
     --radius:10px;
   }
   *{box-sizing:border-box}
+  html,body{overflow-x:hidden}
+  input,select,textarea{max-width:100%}
   body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
        background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
   h1,h2,h3{margin:0;font-weight:600}
@@ -80,6 +82,15 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
   tr:last-child td{border-bottom:none}
   td.num,th.num{text-align:right}
   .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;background:#eef4f2;color:var(--teal)}
+  .lrow{display:flex;gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--surface)}
+  .lrow:last-child{border-bottom:none}
+  .ldot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  .lmain{flex:1;min-width:0}
+  .lname{font-size:13.5px;font-weight:600;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .lmeta{font-size:12px;color:var(--muted);margin-top:2px;word-break:break-word}
+  .lright{text-align:right;flex:0 0 auto;max-width:48%}
+  .lprice{font-size:13px;font-weight:600}
+  .lbtns{display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap;margin-top:4px}
   .pill.warn{background:#fcefe2;color:var(--warn)} .pill.bad{background:#fcecea;color:var(--danger)}
   .empty{padding:40px;text-align:center;color:var(--muted)}
 
@@ -102,7 +113,7 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
   .pos-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:16px;align-items:start}
   .pos-left{min-width:0}
   .pos-right{min-width:0;position:sticky;top:72px;align-self:start}
-  @media(max-width:900px){
+  @media(max-width:1024px){
     html,body{overflow-x:hidden}
     .shell{grid-template-columns:1fr}
     .side{position:fixed;left:0;top:0;bottom:0;width:240px;transform:translateX(-100%);transition:transform .22s;z-index:40}
@@ -125,6 +136,7 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
     table.rsp td:first-child{font-weight:600}
     table.rsp td[data-l=""]{justify-content:flex-end;flex-wrap:wrap;gap:6px}
     table.rsp td[data-l=""]::before{content:none}
+    table.rsp td[data-empty="1"]{display:none}
     .cards{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
   }
   #rotate-lock{display:none;position:fixed;inset:0;z-index:99999;background:var(--teal);color:#fff;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:28px}
@@ -187,14 +199,14 @@ const LS_URL='kit_sb_url', LS_KEY='kit_sb_key';
 const DEFAULT_URL='https://ehorzoooqinfcmgyitju.supabase.co';
 const DEFAULT_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVob3J6b29vcWluZmNtZ3lpdGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjk0MjUsImV4cCI6MjA5ODIwNTQyNX0.Y8ME7LPHgoTayA1CwnC9Q3oXHHNE9G_s_lVHdNkxFPI';
 let sb=null, ME={username:'',role:'',id:''}, SETTINGS={}, POLL=null, SHIFT=null;
-const APP_VER='2026-07-06.2';
+const APP_VER='2026-07-06.4';
 document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VER);});
 /* Tabel responsif otomatis: tiap tabel diberi label kolom agar jadi kartu di layar kecil */
 function rspTables(){
   document.querySelectorAll('table').forEach(t=>{
     t.classList.add('rsp');
     const ths=[...t.querySelectorAll('thead th')].map(x=>x.textContent.trim());
-    t.querySelectorAll('tbody tr').forEach(tr=>[...tr.children].forEach((td,i)=>{ if(!td.hasAttribute('data-l')) td.setAttribute('data-l',ths[i]||''); }));
+    t.querySelectorAll('tbody tr').forEach(tr=>[...tr.children].forEach((td,i)=>{ if(!td.hasAttribute('data-l')) td.setAttribute('data-l',ths[i]||''); if(td.textContent.trim()==='\u2014') td.setAttribute('data-empty','1'); }));
   });
 }
 document.addEventListener('DOMContentLoaded',()=>{ rspTables(); new MutationObserver(rspTables).observe(document.body,{childList:true,subtree:true}); });
@@ -330,26 +342,24 @@ const CFG={
       {k:'price_dinein',l:'Harga',type:'num'},
       {k:'stock',l:'Stok (utk Jadi)',type:'num'},{k:'min_stock',l:'Stok Min',type:'num'},
       {k:'available',l:'Tersedia',type:'bool'}],
-    cols:[{k:'name',l:'Nama'},{k:'category',l:'Kategori'},{k:'type',l:'Jenis'},
-      {k:'kitchen',l:'Dapur'},{k:'price_dinein',l:'Harga',num:true,money:true},{k:'available',l:'Status',avail:true}],
-    rowAction:{label:'Komposisi',fn:'openComposition'}},
+    cols:[{k:'name',l:'Nama',dot:'available'},{k:'category',l:'Kategori'},{k:'type',l:'Jenis',badge:{Jadi:'J',Resep:'R',Bundling:'B'}},{k:'kitchen',l:'Dapur'},{k:'price_dinein',l:'Harga',num:true,money:true}],
+    rowAction:{label:'Komposisi',fn:'openComposition',show:r=>r.type!=='Jadi'}},
   raw:{table:'raw_materials',title:'Bahan Baku',
     fields:[
       {k:'code',l:'Kode'},{k:'name',l:'Nama',req:true},{k:'category',l:'Kategori'},
+      {k:'kelompok',l:'Kelompok',type:'select',opts:['Makanan','Minuman','Umum']},
       {k:'unit_buy',l:'Satuan Beli'},{k:'unit_use',l:'Satuan Pakai'},
       {k:'conversion',l:'Konversi (1 beli = ? pakai)',type:'num'},
       {k:'avg_cost',l:'Harga rata-rata / satuan pakai',type:'num'},
       {k:'stock',l:'Stok (satuan pakai)',type:'num'},{k:'min_stock',l:'Stok Min',type:'num'}],
-    cols:[{k:'name',l:'Nama'},{k:'category',l:'Kategori'},{k:'unit_use',l:'Satuan'},
-      {k:'stock',l:'Stok',num:true},{k:'min_stock',l:'Min',num:true},{k:'avg_cost',l:'HPP/satuan',num:true,money:true}]},
+    cols:[{k:'name',l:'Nama'},{k:'kelompok',l:'Kel.',badge:{Makanan:'BBF',Minuman:'BBD',Umum:'BB'}},{k:'category',l:'Kategori'},{k:'unit_use',l:'Satuan'},{k:'avg_cost',l:'Harga',num:true,money:true},{k:'stock',l:'Stok',num:true},{k:'min_stock',l:'Min',num:true}]},
   seasoning:{table:'seasonings',title:'Bumbu',
     fields:[
       {k:'code',l:'Kode'},{k:'name',l:'Nama',req:true},
       {k:'kelompok',l:'Kelompok',type:'select',opts:['Makanan','Minuman','Umum']},
       {k:'unit',l:'Satuan'},{k:'avg_cost',l:'Harga Beli/satuan (kosong utk buatan sendiri)',type:'num'},
       {k:'stock',l:'Stok',type:'num'},{k:'min_stock',l:'Stok Min',type:'num'},{k:'note',l:'Catatan'}],
-    cols:[{k:'name',l:'Nama'},{k:'kelompok',l:'Kelompok'},{k:'unit',l:'Satuan'},
-      {k:'stock',l:'Stok',num:true},{k:'min_stock',l:'Min',num:true}]},
+    cols:[{k:'name',l:'Nama'},{k:'kelompok',l:'Kel.',badge:{Makanan:'BUF',Minuman:'BUD',Umum:'BU'}},{k:'unit',l:'Satuan'},{k:'avg_cost',l:'Harga',num:true,money:true},{k:'stock',l:'Stok',num:true},{k:'min_stock',l:'Min',num:true}]},
   supplier:{table:'suppliers',title:'Supplier',
     fields:[{k:'name',l:'Nama',req:true},{k:'phone',l:'Telepon'},{k:'note',l:'Catatan'}],
     cols:[{k:'name',l:'Nama'},{k:'phone',l:'Telepon'},{k:'note',l:'Catatan'}]},
@@ -373,30 +383,68 @@ const CFG={
     cols:[{k:'name',l:'Nama'},{k:'calc',l:'Tipe'},{k:'value',l:'Nilai',num:true},
       {k:'scope',l:'Cakupan'},{k:'product_ids',l:'Produk',prodcount:true},{k:'active',l:'Status',bool:true}]},
 };
+let CRUD={q:'',cat:'all',kel:'all',st:'active',data:[],cfg:null};
 async function crud(cfg){
   const c=document.getElementById('content');
+  CRUD={q:'',cat:'all',kel:'all',st:cfg.archive?'active':'all',data:[],cfg};
+  const hasCat=cfg.fields.some(f=>f.k==='category');
+  const hasKel=cfg.fields.some(f=>f.k==='kelompok');
+  const legend=[]; (cfg.cols||[]).forEach(co=>{ if(co.badge){ legend.push(Object.entries(co.badge).map(([k,v])=>v+'='+k).join(' \u00b7 ')); } if(co.dot){ legend.push('\u25cf hijau = tersedia'); } });
   c.innerHTML=`<div class="pagehead"><h2>${cfg.title}</h2>
     <button class="btn" onclick="editRow(CFG.${keyOf(cfg)},null)">+ Tambah</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:${legend.length?'6px':'12px'}">
+      <input id="cr_q" placeholder="Cari nama / kode..." style="flex:1;min-width:140px" oninput="CRUD.q=this.value;renderCrud()">
+      ${hasKel?`<select style="width:auto" onchange="CRUD.kel=this.value;renderCrud()"><option value="all">Semua kelompok</option><option>Makanan</option><option>Minuman</option><option>Umum</option></select>`:''}
+      ${hasCat?`<select id="cr_cat" style="width:auto" onchange="CRUD.cat=this.value;renderCrud()"><option value="all">Semua kategori</option></select>`:''}
+      ${cfg.archive?`<select style="width:auto" onchange="CRUD.st=this.value;renderCrud()"><option value="active">Aktif</option><option value="inactive">Nonaktif</option><option value="all">Semua</option></select>`:''}
+    </div>
+    ${legend.length?`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">${legend.join(' \u00b7 ')}</div>`:''}
     <div class="panel" id="tbl"><div class="empty">Memuat...</div></div>`;
   const {data,error}=await sb.from(cfg.table).select(cfg.select||'*').order('name');
   const tbl=document.getElementById('tbl');
   if(error){ tbl.innerHTML=`<div class="empty">Gagal memuat: ${esc(error.message)}</div>`; return; }
-  if(!data.length){ tbl.innerHTML=`<div class="empty">Belum ada data. Tambah manual atau lewat Impor Excel.</div>`; return; }
-  let h=`<table><thead><tr>${cfg.cols.map(co=>`<th class="${co.num?'num':''}">${co.l}</th>`).join('')}<th></th></tr></thead><tbody>`;
-  data.forEach(r=>{
-    const archived = cfg.archive && r.active===false;
-    h+='<tr'+(archived?' style="opacity:.5"':'')+'>'+cfg.cols.map(co=>{
-      let v=r[co.k];
-      if(co.avail){ const bad=v===false; return `<td><span class="pill ${bad?'bad':''}">${bad?'Tidak tersedia':'Tersedia'}</span></td>`; }
-      if(co.bool){ const off=v===false; return `<td><span class="pill" style="${off?'background:#eee;color:#888':''}">${off?'Nonaktif':'Aktif'}</span></td>`; }
-      if(co.prodcount){ return `<td>${Array.isArray(v)&&v.length?v.length+' produk':(r.product?esc(r.product.name):'—')}</td>`; }
-      if(co.fk){ v=(v&&v[co.fkLabel||'name'])||'—'; return `<td>${esc(v)}</td>`; }
-      if(co.money) v=rp(v); else if(v==null||v==='') v='—';
-      return `<td class="${co.num?'num':''}">${esc(v)}</td>`;
-    }).join('')+`<td class="num">${archived?'<span class="pill bad" style="margin-right:6px">Arsip</span>':''}${cfg.rowAction&&!archived?`<button class="btn sec sm" onclick='${cfg.rowAction.fn}(${JSON.stringify(r.id)})'>${cfg.rowAction.label}</button> `:''}<button class="btn sec sm" onclick='editRow(CFG.${keyOf(cfg)},${JSON.stringify(r.id)})'>Edit</button>
-      ${archived?`<button class="btn sec sm" onclick='restoreRow("${cfg.table}",${JSON.stringify(r.id)})'>Pulihkan</button>`:`<button class="btn danger sm" onclick='delRow("${cfg.table}",${JSON.stringify(r.id)},"${esc(r.name)}")'>Hapus</button>`}</td></tr>`;
+  CRUD.data=data||[];
+  if(hasCat){ const sel=document.getElementById('cr_cat'); if(sel){ const cats=[...new Set(CRUD.data.map(r=>r.category).filter(Boolean))].sort(); sel.innerHTML='<option value="all">Semua kategori</option>'+cats.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join(''); } }
+  renderCrud();
+}
+const fmtn=v=>{const n=Number(v);return isNaN(n)?esc(v):n.toLocaleString('id-ID');};
+function renderCrud(){
+  const cfg=CRUD.cfg, tbl=document.getElementById('tbl'); if(!cfg||!tbl)return;
+  const q=CRUD.q.trim().toLowerCase();
+  const data=CRUD.data.filter(r=>{
+    if(q && !(String(r.name||'').toLowerCase().includes(q)||String(r.code||'').toLowerCase().includes(q)))return false;
+    if(CRUD.cat!=='all' && r.category!==CRUD.cat)return false;
+    if(CRUD.kel!=='all' && r.kelompok!==CRUD.kel)return false;
+    if(cfg.archive){ if(CRUD.st==='active'&&r.active===false)return false; if(CRUD.st==='inactive'&&r.active!==false)return false; }
+    return true;
   });
-  tbl.innerHTML=h+'</tbody></table>';
+  if(!CRUD.data.length){ tbl.innerHTML=`<div class="empty">Belum ada data. Tambah manual atau lewat Impor Excel.</div>`; return; }
+  if(!data.length){ tbl.innerHTML=`<div class="empty">Tidak ada data yang cocok dengan pencarian/filter.</div>`; return; }
+  const titleCol=cfg.cols[0], moneyCol=cfg.cols.find(co=>co.money);
+  tbl.innerHTML=data.map(r=>{
+    const archived = cfg.archive && r.active===false;
+    const dotOn = titleCol.dot ? (r[titleCol.dot]!==false && !archived) : null;
+    const badges=cfg.cols.filter(co=>co.badge&&r[co.k]!=null&&co.badge[r[co.k]]).map(co=>`<span class="pill" style="font-size:10px" title="${esc(r[co.k])}">${esc(co.badge[r[co.k]])}</span>`).join(' ');
+    const meta=cfg.cols.slice(1).map(co=>{
+      if(co.badge||co.money)return '';
+      let v=r[co.k];
+      if(co.dot)return '';
+      if(co.avail){ return v===false?'<span class="pill bad" style="font-size:10px">Tidak tersedia</span>':''; }
+      if(co.bool){ return v===false?'<span class="pill" style="font-size:10px;background:#eee;color:#888">Nonaktif</span>':''; }
+      if(co.prodcount){ return Array.isArray(v)&&v.length?v.length+' produk':(r.product?esc(r.product.name):''); }
+      if(co.fk){ v=(v&&v[co.fkLabel||'name'])||''; return v?esc(v):''; }
+      if(v==null||v==='')return '';
+      if(co.num)return esc(co.l)+' '+fmtn(v);
+      return esc(v);
+    }).filter(Boolean).join(' \u00b7 ');
+    return `<div class="lrow"${archived?' style="opacity:.55"':''}>
+      ${dotOn!=null?`<span class="ldot" title="${dotOn?'Tersedia':'Tidak aktif / tidak tersedia'}" style="background:${dotOn?'#1d9e75':'#c9c7bf'}"></span>`:''}
+      <div class="lmain"><div class="lname">${esc(r[titleCol.k]==null?'':r[titleCol.k])}${badges?' '+badges:''}${archived?' <span class="pill bad" style="font-size:10px">Arsip</span>':''}</div>
+      ${meta?`<div class="lmeta">${meta}</div>`:''}</div>
+      <div class="lright">${moneyCol&&r[moneyCol.k]!=null?`<div class="lprice">${rp(r[moneyCol.k])}</div>`:''}
+        <div class="lbtns">${cfg.rowAction&&!archived&&(!cfg.rowAction.show||cfg.rowAction.show(r))?`<button class="btn sec sm" onclick='${cfg.rowAction.fn}(${JSON.stringify(r.id)})'>${cfg.rowAction.label}</button>`:''}<button class="btn sec sm" onclick='editRow(CFG.${keyOf(cfg)},${JSON.stringify(r.id)})'>Edit</button>${archived?`<button class="btn sec sm" onclick='restoreRow("${cfg.table}",${JSON.stringify(r.id)})'>Pulihkan</button>`:`<button class="btn danger sm" onclick='delRow("${cfg.table}",${JSON.stringify(r.id)},"${esc(r.name)}")'>Hapus</button>`}</div>
+      </div></div>`;
+  }).join('');
 }
 function keyOf(cfg){ return Object.keys(CFG).find(k=>CFG[k]===cfg); }
 async function editRow(cfg,id){
@@ -507,7 +555,7 @@ function G(r,...names){
   return undefined;
 }
 const IMPMAP={
-  'Bahan Baku':{table:'raw_materials',map:r=>({code:G(r,'Kode'),name:G(r,'Nama Bahan Baku','Nama Bahan','Nama'),category:G(r,'Kategori'),
+  'Bahan Baku':{table:'raw_materials',map:r=>({code:G(r,'Kode'),name:G(r,'Nama Bahan Baku','Nama Bahan','Nama'),category:G(r,'Kategori'),kelompok:(()=>{const k=String(G(r,'Kelompok')||'').trim().toLowerCase();return k.indexOf('min')===0?'Minuman':k.indexOf('umum')===0?'Umum':'Makanan';})(),
      unit_buy:G(r,'Satuan Beli','Unit Beli')||'-',unit_use:G(r,'Satuan Pakai','Unit Pakai')||'-',conversion:qnum(G(r,'Konversi (1 Satuan Beli = … Satuan Pakai)','Konversi'))||1,
      avg_cost:(inum(G(r,'Harga Beli (per Satuan Beli)','Harga Beli','Harga'))||0)/(qnum(G(r,'Konversi (1 Satuan Beli = … Satuan Pakai)','Konversi'))||1),
      stock:qnum(G(r,'Stok Awal (Satuan Pakai)','Stok Awal','Stok')),min_stock:qnum(G(r,'Stok Minimum (Satuan Pakai)','Stok Minimum','Stok Min'))})},
@@ -1815,7 +1863,7 @@ async function renderCompo(){
     const {data:items}=await sb.from('recipe_items').select('*').eq('product_id',p.id);
     const rows=(items||[]).map(it=>{const arr=it.item_type==='raw'?COMPO.raw:COMPO.sea; const x=arr.find(a=>a.id===it.item_id)||{};
       const unit=it.item_type==='raw'?(x.unit_use||''):(x.unit||'');
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)"><span>${esc(x.name||'(item)')} — ${it.qty} ${esc(unit)} <span style="color:var(--muted);font-size:11px">(${it.item_type==='raw'?'bahan':'bumbu'})</span></span><button class="btn danger sm" onclick="compoDelRecipe('${it.id}')">Hapus</button></div>`;}).join('')||'<div class="empty">Belum ada bahan.</div>';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)"><span>${esc(x.name||'(item)')} — ${it.qty} ${esc(unit)} <span class="pill" style="font-size:10px" title="${it.item_type==='raw'?'Bahan baku':'Bumbu'}">${it.item_type==='raw'?'BB':'BU'}</span></span><button class="btn danger sm" onclick="compoDelRecipe('${it.id}')">Hapus</button></div>`;}).join('')||'<div class="empty">Belum ada bahan.</div>';
     document.getElementById('compo-body').innerHTML=`<h2 style="margin-bottom:4px">Resep — ${esc(p.name)}</h2><p style="margin-top:0;color:var(--muted);font-size:13px">Bahan baku (dan bumbu bila perlu) per 1 porsi. Dipakai untuk potong stok & hitung HPP.</p>${rows}
       <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
         <select id="cr_type" onchange="compoTypeChange()" style="width:88px"><option value="raw">Bahan</option><option value="seasoning">Bumbu</option></select>
