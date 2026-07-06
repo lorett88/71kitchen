@@ -199,7 +199,7 @@ const LS_URL='kit_sb_url', LS_KEY='kit_sb_key';
 const DEFAULT_URL='https://ehorzoooqinfcmgyitju.supabase.co';
 const DEFAULT_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVob3J6b29vcWluZmNtZ3lpdGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjk0MjUsImV4cCI6MjA5ODIwNTQyNX0.Y8ME7LPHgoTayA1CwnC9Q3oXHHNE9G_s_lVHdNkxFPI';
 let sb=null, ME={username:'',role:'',id:''}, SETTINGS={}, POLL=null, SHIFT=null;
-const APP_VER='2026-07-06.10';
+const APP_VER='2026-07-06.12';
 document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VER);});
 /* Tabel responsif otomatis: tiap tabel diberi label kolom agar jadi kartu di layar kecil */
 function rspTables(){
@@ -779,8 +779,9 @@ async function renderPosOpen(){
 function posNewOrder(){
   if(!SHIFT){ alert('Buka shift kasir dulu sebelum membuat pesanan.'); go('shift'); return; }
   openModal(`<h2 style="margin-bottom:14px">Pesanan Baru</h2>
-   ${field('Tipe penjualan',`<select id="po_type">${CHANNELS.map(c=>`<option value="${c.id}">${c.type}${c.online?' (online)':''}</option>`).join('')}</select>`)}
+   ${field('Tipe penjualan',`<select id="po_type" onchange="document.getElementById('po_guests').style.display=this.value==='dinein'?'grid':'none'">${CHANNELS.map(c=>`<option value="${c.id}">${c.type}${c.online?' (online)':''}</option>`).join('')}</select>`)}
    ${field('No meja (kosongkan jika bukan dine in)',`<input id="po_table">`)}
+   <div class="grid2" id="po_guests">${field('Tamu dewasa',`<input id="po_ga" type="text" inputmode="numeric" value="0">`)}${field('Tamu anak',`<input id="po_gc" type="text" inputmode="numeric" value="0">`)}</div>
    ${field('Nama customer (opsional)',`<input id="po_cust">`)}
    ${field('No HP member (opsional)',`<input id="po_member" placeholder="08..." onchange="posMemberLookup()">`)}
    <div id="po-msg" class="msg"></div>
@@ -803,7 +804,8 @@ async function posCreateOrder(){
   const phone=document.getElementById('po_member').value.trim();
   let member=null;
   if(phone){ const {data}=await sb.from('members').select('id,name,phone,points,tier:membership_tiers(discount_pct,name)').eq('phone',phone).maybeSingle(); if(data)member=data; }
-  const {data,error}=await sb.from('orders').insert({sales_type:type,table_no:table,customer_name:cust,member_id:member?member.id:null,shift_id:SHIFT?SHIFT.id:null}).select().single();
+  const ga=type==='dinein'?(inum(document.getElementById('po_ga').value)||0):0, gc=type==='dinein'?(inum(document.getElementById('po_gc').value)||0):0;
+  const {data,error}=await sb.from('orders').insert({sales_type:type,table_no:table,customer_name:cust,member_id:member?member.id:null,shift_id:SHIFT?SHIFT.id:null,guests_adult:ga,guests_child:gc}).select().single();
   if(error){ msg('po-msg','Gagal: '+error.message,'err'); return; }
   if(phone&&!member) msg('po-msg','Catatan: nomor member tidak ditemukan, lanjut tanpa member.','');
   POS.orderId=data.id; POS.order=data; POS.items=[]; POS.member=member;
@@ -895,7 +897,7 @@ function renderPosOrder(){
   if(!POS.orderId){ el.innerHTML='<div class="empty">Belum ada pesanan aktif.</div>'; return; }
   const o=POS.order;
   const head=`<div style="margin-bottom:10px"><b>${o.table_no?('Meja '+esc(o.table_no)):esc(o.customer_name||'Pesanan')}</b>
-    <div style="color:var(--muted);font-size:12px">${posTypeLabel(o.sales_type)}${POS.member?(' · Member: '+esc(POS.member.name||POS.member.phone)):''}</div>
+    <div style="color:var(--muted);font-size:12px">${posTypeLabel(o.sales_type)}${(o.sales_type==='dinein'&&(Number(o.guests_adult)||Number(o.guests_child)))?(' · Tamu '+(o.guests_adult||0)+' dws'+(Number(o.guests_child)?(' + '+o.guests_child+' anak'):'')):''}${POS.member?(' · Member: '+esc(POS.member.name||POS.member.phone)):''}</div>
     <div style="display:flex;gap:8px;margin-top:6px;font-size:12px"><a href="#" onclick="posMoveTable();return false" style="color:var(--teal)">Pindah/Edit</a> · <a href="#" onclick="posMerge();return false" style="color:var(--teal)">Gabung</a> · <a href="#" onclick="posSplit();return false" style="color:var(--teal)">Pisah</a></div></div>`;
   if(!POS.items.length){ el.innerHTML=head+'<div class="empty">Tap produk untuk menambah.</div>'; return; }
   const pf=posPriceField(o.sales_type); let rows='';
@@ -1280,11 +1282,13 @@ function renderPurModal(){
   };
   const keepP=(id,def)=>{const el=document.getElementById(id);return el!=null?el.value:def;};
   const vSup=keepP('pu_sup',''), vType=keepP('pu_type','cash'), vDue=keepP('pu_due',''), vRet=keepP('pu_ret','0'), vProof=keepP('pu_proof',''), vNote=keepP('pu_note',''), vAcct=keepP('pu_acct',opAcct());
+  const _pk=document.getElementById('pu_kat'), vKat=_pk?_pk.checked:false;
   document.getElementById('pur-body').innerHTML=`<h2 style="margin-bottom:12px">Pembelian Baru</h2>
    <div class="grid2">${field('Supplier',`<select id="pu_sup"><option value="">— tanpa supplier —</option>${S3.sup.map(s=>`<option value="${s.id}" ${vSup===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>`)}
    ${field('Tipe bayar',`<select id="pu_type" onchange="document.getElementById('pu_due_w').style.display=this.value==='tempo'?'block':'none';document.getElementById('pu_acct_w').style.display=this.value==='tempo'?'none':'block'"><option value="cash" ${vType==='cash'?'selected':''}>Tunai</option><option value="tempo" ${vType==='tempo'?'selected':''}>Tempo</option></select>`)}</div>
    <div id="pu_due_w" style="display:${vType==='tempo'?'block':'none'}">${field('Jatuh tempo',`<input id="pu_due" type="date" value="${esc(vDue)}">`)}</div>
    <div id="pu_acct_w" style="display:${vType==='tempo'?'none':'block'}">${field('Dibayar dari',`<select id="pu_acct">${acctOpts(vAcct)}</select>`)}</div>
+   <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:2px 0 8px"><input type="checkbox" id="pu_kat" ${vKat?'checked':''} style="width:auto"> Pembelian untuk <b>katering</b></label>
    <div style="font-size:13px;color:var(--muted);margin:8px 0">Pilih barang, lalu isi <b>Jumlah beli</b> dan <b>Harga satuan</b>-nya. Jumlah boleh desimal (mis. 0,5 kg).</div>${PURLINES.map(line).join('')}
    <button class="btn ghost sm" onclick="PURLINES.push({cat:'raw_mak',item_id:'',qty:1,unit_cost:0});renderPurModal()">+ Tambah item</button>
    <div class="grid2" style="margin-top:10px">${field('Sisa uang kembali (Rp)',`<input id="pu_ret" type="text" inputmode="numeric" value="${esc(vRet)}">`)}${field('Bukti (URL, opsional)',`<input id="pu_proof" value="${esc(vProof)}">`)}</div>
@@ -1299,7 +1303,7 @@ async function purSave(){
   const type=document.getElementById('pu_type').value, total=lines.reduce((s,l)=>s+l.qty*l.unit_cost,0);
   msg('pu-msg','Menyimpan...','');
   const {data,error}=await sb.from('purchases').insert({supplier_id:document.getElementById('pu_sup').value||null,pay_type:type,total,
-    pay_account_id:type==='cash'?(document.getElementById('pu_acct').value||null):null,
+    pay_account_id:type==='cash'?(document.getElementById('pu_acct').value||null):null,for_catering:document.getElementById('pu_kat').checked,
     due_date:type==='tempo'?(document.getElementById('pu_due').value||null):null,returned_cash:Number(document.getElementById('pu_ret').value)||0,
     proof_url:document.getElementById('pu_proof').value||null,note:document.getElementById('pu_note').value||null}).select().single();
   if(error){ msg('pu-msg','Gagal: '+error.message,'err'); return; }
@@ -1328,6 +1332,7 @@ function expNew(){
    ${field('Tipe bayar',`<select id="ex_type" onchange="document.getElementById('ex_due_w').style.display=this.value==='tempo'?'block':'none';document.getElementById('ex_acct_w').style.display=this.value==='tempo'?'none':'block'"><option value="cash">Tunai</option><option value="tempo">Tempo</option></select>`)}
    ${field('Bukti (URL, opsional)',`<input id="ex_proof">`)}</div>
    <div id="ex_acct_w">${field('Dibayar dari',`<select id="ex_acct">${acctOpts(opAcct())}</select>`)}</div>
+   <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:2px 0 8px"><input type="checkbox" id="ex_kat" style="width:auto"> Pengeluaran untuk <b>katering</b> (mis. tenaga kerja, sewa alat)</label>
    <div id="ex_due_w" style="display:none">${field('Jatuh tempo',`<input id="ex_due" type="date">`)}</div>${field('Catatan',`<input id="ex_note">`)}
    <div id="ex-msg" class="msg"></div>
    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="expSave()">Simpan (minta otorisasi)</button></div>`);
@@ -1338,7 +1343,7 @@ async function expSave(){
   const type=document.getElementById('ex_type').value;
   msg('ex-msg','Menyimpan...','');
   const {error}=await sb.from('expenses').insert({category:document.getElementById('ex_cat').value,amount:amt,pay_type:type,
-    pay_account_id:type==='cash'?(document.getElementById('ex_acct').value||null):null,
+    pay_account_id:type==='cash'?(document.getElementById('ex_acct').value||null):null,for_catering:document.getElementById('ex_kat').checked,
     due_date:type==='tempo'?(document.getElementById('ex_due').value||null):null,proof_url:document.getElementById('ex_proof').value||null,note:document.getElementById('ex_note').value||null});
   if(error){ msg('ex-msg','Gagal: '+error.message,'err'); return; }
   closeModal(); viewExpense();
@@ -1436,18 +1441,26 @@ async function viewKitchen(){
 }
 async function loadKitchen(){
   const board=document.getElementById('kit-board'); if(!board)return;
-  const {data}=await sb.from('kitchen_tickets').select('*, order:orders(table_no,customer_name,sales_type), items:kitchen_ticket_items(qty,name,note)').eq('status','new').order('created_at');
+  const {data}=await sb.from('kitchen_tickets').select('*, order:orders(table_no,customer_name,sales_type), items:kitchen_ticket_items(id,qty,name,note,done)').eq('status','new').order('created_at');
   if(!data||!data.length){ board.innerHTML='<div class="empty">Tidak ada tiket aktif.</div>'; return; }
   board.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">'+
    data.map(t=>{const o=t.order||{};const tbl=o.table_no?('Meja '+o.table_no):(o.customer_name||'-');
     return `<div class="panel" style="padding:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <span class="pill">DAPUR ${esc((t.kitchen||'').toUpperCase())}</span><b>${esc(t.ticket_no||'')}</b></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${esc(tbl)} · ${posTypeLabel(o.sales_type)} · ${new Date(t.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})}</div>
-      ${(t.items||[]).map(i=>`<div style="font-size:15px"><b>${i.qty}×</b> ${esc(i.name)}</div>${i.note?`<div style="font-size:11px;color:var(--muted)">› ${esc(i.note)}</div>`:''}`).join('')}
-      <button class="btn" style="width:100%;margin-top:10px" onclick="kitDone('${t.id}')">Selesai</button></div>`;
+      ${(t.items||[]).map(i=>`<label style="display:flex;gap:8px;align-items:flex-start;font-size:15px;padding:3px 0;cursor:pointer;${i.done?'opacity:.55':''}">
+        <input type="checkbox" ${i.done?'checked':''} onchange="kitToggle('${i.id}',this.checked)" style="width:19px;height:19px;margin-top:2px;flex:0 0 auto">
+        <span style="${i.done?'text-decoration:line-through':''}"><b>${i.qty}×</b> ${esc(i.name)}${i.note?`<div style="font-size:11px;color:var(--muted)">› ${esc(i.note)}</div>`:''}</span></label>`).join('')}
+      ${(()=>{const tot=(t.items||[]).length,dn=(t.items||[]).filter(x=>x.done).length;return `<div style="font-size:11px;color:${dn===tot&&tot?'var(--ok)':'var(--muted)'};margin-top:4px">${dn}/${tot} selesai</div>`;})()}
+      <button class="btn ${((t.items||[]).length&&(t.items||[]).every(x=>x.done))?'':'sec'}" style="width:100%;margin-top:8px" onclick="kitDone('${t.id}')">Selesai — angkat tiket</button></div>`;
    }).join('')+'</div>';
 }
 async function kitDone(id){ const {error}=await sb.from('kitchen_tickets').update({status:'done'}).eq('id',id); if(error){alert(error.message);return;} loadKitchen(); }
+async function kitToggle(itemId,val){
+  const {error}=await sb.from('kitchen_ticket_items').update({done:val}).eq('id',itemId);
+  if(error){ alert('Gagal: '+error.message); }
+  loadKitchen();
+}
 
 /* ==================== BOOKING ==================== */
 let BKLINES=[], BKPRODS=[];
@@ -1623,18 +1636,23 @@ async function viewIncome(){
   const {data}=await sb.from('other_incomes').select('*, account:cash_accounts(name)').order('created_at',{ascending:false}).limit(100);
   const t=document.getElementById('oi-tbl');
   if(!data||!data.length){ t.innerHTML='<div class="empty">Belum ada catatan. Tekan "+ Catat Pendapatan".</div>'; return; }
-  t.innerHTML=data.map(r=>{
-    const meta=[r.occurred_at, r.account?('ke '+r.account.name):'', r.note||''].filter(Boolean).join(' \u00b7 ');
-    return `<div class="lrow"><div class="lmain"><div class="lname">${esc(r.category)} ${statusPill(r.status)}</div><div class="lmeta">${esc(meta)}</div></div>
+  OIROWS=data;
+  t.innerHTML=data.map((r,i)=>{
+    const sisa=Math.max(0,Number(r.amount)-Number(r.paid||0));
+    let pill=statusPill(r.status);
+    if(r.status==='approved'&&r.pay_type==='tempo') pill = sisa<=0?'<span class="pill">Lunas</span>':(Number(r.paid)>0?'<span class="pill warn">Sebagian</span>':'<span class="pill warn">Piutang</span>');
+    const meta=[r.occurred_at, r.pay_type==='tempo'&&r.due_date?('tempo s.d. '+r.due_date):'', r.pay_type==='tempo'&&sisa>0&&r.status==='approved'?('sisa '+rp(sisa)):'', r.account?('ke '+r.account.name):'', r.note||''].filter(Boolean).join(' \u00b7 ');
+    return `<div class="lrow"><div class="lmain"><div class="lname">${esc(r.category)} ${pill}</div><div class="lmeta">${esc(meta)}</div></div>
       <div class="lright"><div class="lprice" style="color:var(--ok)">+${rp(r.amount)}</div>
-      <div class="lbtns">${r.status==='requested'&&isMgr()?`<button class="btn sm" onclick="oiApprove('${r.id}')">Setujui</button><button class="btn danger sm" onclick="oiReject('${r.id}')">Tolak</button>`:''}</div></div></div>`;
+      <div class="lbtns">${r.status==='requested'&&isMgr()?`<button class="btn sm" onclick="oiApprove('${r.id}')">Setujui</button><button class="btn danger sm" onclick="oiReject('${r.id}')">Tolak</button>`:''}${r.status==='approved'&&r.pay_type==='tempo'&&sisa>0&&isMgr()?`<button class="btn sm" onclick="oiPay(${i})">Terima</button>`:''}</div></div></div>`;
   }).join('');
 }
 function oiNew(){
   openModal(`<h2 style="margin-bottom:12px">Catat Pendapatan Lain</h2>
-   ${field('Kategori',`<input id="oi_cat" list="oi_dl" placeholder="ketik atau pilih"><datalist id="oi_dl"><option value="Botol bekas"></option><option value="Minyak jelantah"></option><option value="Kardus bekas"></option><option value="Sponsor"></option><option value="Lainnya"></option></datalist>`)}
+   ${field('Kategori',`<input id="oi_cat" list="oi_dl" placeholder="ketik atau pilih"><datalist id="oi_dl"><option value="Botol bekas"></option><option value="Minyak jelantah"></option><option value="Kardus bekas"></option><option value="Katering"></option><option value="Sponsor"></option><option value="Lainnya"></option></datalist>`)}
    <div class="grid2">${field('Jumlah (Rp)',`<input id="oi_amt" type="text" inputmode="numeric">`)}${field('Tanggal',`<input id="oi_date" type="date" value="${new Date().toISOString().slice(0,10)}">`)}</div>
-   ${field('Masuk ke akun',`<select id="oi_acct">${acctOpts(tunaiAcct())}</select>`)}
+   <div class="grid2">${field('Tipe',`<select id="oi_type" onchange="document.getElementById('oi_due_w').style.display=this.value==='tempo'?'block':'none';document.getElementById('oi_acct_w').style.display=this.value==='tempo'?'none':'block'"><option value="cash">Tunai (langsung diterima)</option><option value="tempo">Piutang (ditagih kemudian)</option></select>`)}<div id="oi_due_w" style="display:none">${field('Jatuh tempo (opsional)',`<input id="oi_due" type="date">`)}</div></div>
+   <div id="oi_acct_w">${field('Masuk ke akun',`<select id="oi_acct">${acctOpts(tunaiAcct())}</select>`)}</div>
    ${field('Catatan (opsional)',`<input id="oi_note" placeholder="mis. 12 kg jelantah ke pengepul">`)}
    <div id="oi-msg" class="msg"></div>
    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="oiSave()">Simpan (minta otorisasi)</button></div>`);
@@ -1643,9 +1661,26 @@ async function oiSave(){
   const catg=document.getElementById('oi_cat').value.trim(), amt=inum(document.getElementById('oi_amt').value);
   if(!catg||!amt){ msg('oi-msg','Kategori & jumlah wajib diisi.','err'); return; }
   msg('oi-msg','Menyimpan...','');
-  const {error}=await sb.from('other_incomes').insert({category:catg,amount:amt,account_id:document.getElementById('oi_acct').value||null,
+  const ptype=document.getElementById('oi_type').value;
+  const {error}=await sb.from('other_incomes').insert({category:catg,amount:amt,pay_type:ptype,due_date:ptype==='tempo'?(document.getElementById('oi_due').value||null):null,account_id:ptype==='cash'?(document.getElementById('oi_acct').value||null):null,
     occurred_at:document.getElementById('oi_date').value||new Date().toISOString().slice(0,10),note:document.getElementById('oi_note').value||null});
   if(error){ msg('oi-msg','Gagal: '+error.message,'err'); return; }
+  closeModal(); viewIncome();
+}
+let OIROWS=[];
+function oiPay(i){
+  const r=OIROWS[i]; if(!r)return; const sisa=Math.max(0,Number(r.amount)-Number(r.paid||0));
+  openModal(`<h2 style="margin-bottom:12px">Terima Pembayaran — ${esc(r.category)}</h2>
+   ${field('Jumlah diterima (Rp)',`<input id="op_amt" type="text" inputmode="numeric" value="${Math.round(sisa)}">`)}
+   ${field('Masuk ke akun',`<select id="op_acct">${acctOpts(rekAcct())}</select>`)}
+   <div style="font-size:12px;color:var(--muted)">Sisa tagihan: ${rp(sisa)} — boleh dibayar sebagian.</div>
+   <div id="op-msg" class="msg"></div>
+   <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="oiPaySave('${r.id}')">Terima</button></div>`);
+}
+async function oiPaySave(id){
+  const a=inum(document.getElementById('op_amt').value); if(!a){msg('op-msg','Isi jumlah.','err');return;}
+  const {error}=await sb.rpc('other_income_pay',{p_id:id,p_amount:a,p_account:document.getElementById('op_acct').value});
+  if(error){msg('op-msg','Gagal: '+error.message,'err');return;}
   closeModal(); viewIncome();
 }
 async function oiApprove(id){ if(!confirm('Setujui pendapatan ini? Saldo akun akan bertambah.'))return; const {error}=await sb.rpc('approve_other_income',{p_id:id}); if(error){alert('Gagal: '+error.message);return;} viewIncome(); }
@@ -1674,11 +1709,11 @@ async function runReport(){
   const invIds=inv.map(x=>x.id);
   let ii=[]; if(invIds.length) ii=(await sb.from('invoice_items').select('qty,subtotal,name, product:products(name,category)').in('invoice_id',invIds)).data||[];
   const rawMv=(await sb.from('stock_movements').select('qty_change,unit_cost').eq('reason','sale').eq('item_type','raw').gte('created_at',A).lte('created_at',B)).data||[];
-  const pur=(await sb.from('purchases').select('id,total,supplier:suppliers(name)').eq('status','approved').gte('occurred_at',from).lte('occurred_at',to)).data||[];
+  const pur=(await sb.from('purchases').select('id,total,for_catering,supplier:suppliers(name)').eq('status','approved').gte('occurred_at',from).lte('occurred_at',to)).data||[];
   const purIds=pur.map(x=>x.id);
   let seaPI=[]; if(purIds.length) seaPI=(await sb.from('purchase_items').select('subtotal').eq('item_type','seasoning').in('purchase_id',purIds)).data||[];
-  const exp=(await sb.from('expenses').select('category,amount').eq('status','approved').gte('occurred_at',from).lte('occurred_at',to)).data||[];
-  const oi=(await sb.from('other_incomes').select('category,amount').eq('status','approved').gte('occurred_at',from).lte('occurred_at',to)).data||[];
+  const exp=(await sb.from('expenses').select('category,amount,for_catering').eq('status','approved').gte('occurred_at',from).lte('occurred_at',to)).data||[];
+  const oi=(await sb.from('other_incomes').select('category,amount,paid,pay_type').eq('status','approved').gte('occurred_at',from).lte('occurred_at',to)).data||[];
   const bk=(await sb.from('bookings').select('total,status').in('status',['settled','done']).gte('event_date',from).lte('event_date',to)).data||[];
   const sh=(await sb.from('shifts').select('*').gte('opened_at',A).lte('opened_at',B)).data||[];
 
@@ -1696,6 +1731,14 @@ async function runReport(){
   const prodAgg={}; ii.forEach(x=>{const k=x.name||(x.product&&x.product.name)||'(produk)'; if(!prodAgg[k])prodAgg[k]={q:0,o:0}; prodAgg[k].q+=Number(x.qty); prodAgg[k].o+=Number(x.subtotal);});
   RPTP=Object.keys(prodAgg).sort((a,b)=>prodAgg[b].o-prodAgg[a].o).map(k=>({n:k,q:prodAgg[k].q,o:prodAgg[k].o}));
   const supAgg={}; pur.forEach(p=>{const k=(p.supplier&&p.supplier.name)||'Tanpa supplier'; if(!supAgg[k])supAgg[k]={n:0,t:0}; supAgg[k].n++; supAgg[k].t+=Number(p.total);});
+  const isKat=t=>/katering/i.test(String(t||''));
+  const katOI=oi.filter(x=>isKat(x.category));
+  const katIncome=katOI.reduce((s,x)=>s+Number(x.amount),0);
+  const katReceived=katOI.reduce((s,x)=>s+(x.pay_type==='cash'?Number(x.amount):Number(x.paid||0)),0);
+  const katPur=pur.filter(p=>p.for_catering).reduce((s,p)=>s+Number(p.total),0);
+  const katExpAll=exp.filter(e=>e.for_catering).reduce((s,e)=>s+Number(e.amount),0);
+  const katLabor=exp.filter(e=>e.for_catering&&/tenaga|gaji|upah/i.test(String(e.category||''))).reduce((s,e)=>s+Number(e.amount),0);
+  const katProfit=katIncome-katPur-katExpAll;
   const vCount=inv.filter(x=>Number(x.voucher)>0).length, vSum=inv.reduce((s,x)=>s+Number(x.voucher),0);
   const pct=v=>revenue?((v/revenue*100).toFixed(1)+'%'):'-';
   const PL=(l,v,strong)=>`<div style="display:flex;justify-content:space-between;${strong?'font-weight:600;font-size:15px;':''}padding:4px 0"><span>${l}</span><span>${rp(v)} <span style="color:var(--muted);font-size:12px">${pct(v)}</span></span></div>`;
@@ -1728,6 +1771,16 @@ async function runReport(){
   else h+=`<table><thead><tr><th>Kategori</th><th class="num">Jumlah</th></tr></thead><tbody>`+Object.keys(ecat).map(k=>`<tr><td>${esc(k)}</td><td class="num">${rp(ecat[k])}</td></tr>`).join('')+'</tbody></table>';
   h+='</div>';
 
+  if(katIncome||katPur||katExpAll){
+    h+=`<div class="panel" style="padding:16px;margin-bottom:16px"><h3 style="margin-bottom:8px">Katering</h3>
+      ${FR('Nilai pesanan katering (periode)',rp(katIncome))}
+      ${FR('— sudah diterima',rp(katReceived))}
+      ${katIncome-katReceived>0?FR('— sisa piutang',rp(katIncome-katReceived)):''}
+      ${FR('Belanja bahan katering (pembelian)',rp(katPur))}
+      ${FR('Beban katering'+(katLabor?(' (tenaga kerja '+rp(katLabor)+')'):''),rp(katExpAll))}
+      <hr style="border:none;border-top:1px solid var(--line);margin:8px 0">
+      ${FR('<b>Laba katering</b>','<b>'+rp(katProfit)+'</b>')}</div>`;
+  }
   if(oi.length){ const oic={}; oi.forEach(e=>{oic[e.category]=(oic[e.category]||0)+Number(e.amount);});
     h+=`<div class="panel" style="margin-bottom:16px"><div style="padding:12px 16px"><h3>Pendapatan Lain per Kategori</h3></div><table><thead><tr><th>Kategori</th><th class="num">Jumlah</th></tr></thead><tbody>`+Object.keys(oic).sort((a,b)=>oic[b]-oic[a]).map(k=>`<tr><td>${esc(k)}</td><td class="num">${rp(oic[k])}</td></tr>`).join('')+'</tbody></table></div>'; }
   h+=`<div class="panel" style="padding:16px;margin-bottom:16px"><h3 style="margin-bottom:8px">Rekap Voucher</h3>${FR('Jumlah voucher',vCount)}${FR('Total nilai',rp(vSum))}</div>`;
@@ -1808,14 +1861,44 @@ async function closeShiftSave(){
   const cnt=Number(document.getElementById('sf_close').value);
   const {data,error}=await sb.rpc('close_shift',{p_shift:SHIFT.id,p_count:cnt});
   if(error){ msg('sf-msg','Gagal: '+error.message,'err'); return; }
-  SHIFT=null; closeModal();
-  alert('Shift ditutup.\nPerkiraan kas: '+rp(data.expected)+'\nUang fisik: '+rp(cnt)+'\nSelisih: '+rp(data.variance));
-  viewShift();
+  const sh={...SHIFT,closed_at:new Date().toISOString(),expected:data.expected,closing_count:cnt,variance:data.variance,cashier:{username:ME.username}};
+  SHIFT=null;
+  const a=await shiftAgg(sh.id,sh.opened_at,sh.closed_at);
+  const txt=shiftWaText(sh,a);
+  openModal(`<h2 style="margin-bottom:12px">Shift Ditutup</h2>
+    <pre style="background:#f6f4ee;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px;white-space:pre-wrap;max-height:50vh;overflow:auto">${esc(txt.replace(/\*/g,''))}</pre>
+    <div class="modal-foot"><button class="btn ghost" onclick="closeModal();viewShift()">Selesai</button>
+    <button class="btn" onclick="window.open('https://wa.me/?text='+encodeURIComponent(${JSON.stringify('')}+shiftWaTextLast),'_blank')">Kirim ke WA</button></div>`);
+  shiftWaTextLast=txt;
 }
-function waShift(i){
-  const s=SHIFTHIST[i]; if(!s)return; const o=SETTINGS.outlet||{};
-  const txt=`*Laporan Tutup Shift*\n${o.name||'71 Kitchen'}\nKasir: ${s.cashier?s.cashier.username:'-'}\nDibuka: ${new Date(s.opened_at).toLocaleString('id-ID')}\nDitutup: ${s.closed_at?new Date(s.closed_at).toLocaleString('id-ID'):'-'}\nModal awal: ${rp(s.opening_float)}\nPerkiraan kas: ${rp(s.expected)}\nUang fisik: ${rp(s.closing_count)}\nSelisih: ${rp(s.variance)}`;
-  window.open('https://wa.me/?text='+encodeURIComponent(txt),'_blank');
+let shiftWaTextLast='';
+async function shiftAgg(sid,openedAt,closedAt){
+  const {data:inv}=await sb.from('invoices').select('id,total,sales_type,discount_promo,discount_member,voucher, order:orders!inner(shift_id)').eq('order.shift_id',sid).eq('status','paid');
+  const I=inv||[]; const ids=I.map(x=>x.id);
+  let pays=[]; if(ids.length) pays=(await sb.from('payments').select('method,amount').in('invoice_id',ids)).data||[];
+  const byType={},byMethod={},online={};
+  I.forEach(x=>{ byType[x.sales_type]=(byType[x.sales_type]||0)+1; if(isOnlineType(x.sales_type)) online[x.sales_type]=(online[x.sales_type]||0)+Number(x.total); });
+  pays.forEach(p=>{ byMethod[p.method]=(byMethod[p.method]||0)+Number(p.amount); });
+  const omzet=I.reduce((s,x)=>s+Number(x.total),0);
+  const disc=I.reduce((s,x)=>s+Number(x.discount_promo||0)+Number(x.discount_member||0)+Number(x.voucher||0),0);
+  let voids=0; try{ let q=sb.from('activity_log').select('id',{count:'exact',head:true}).eq('action','void_item').gte('created_at',openedAt); if(closedAt)q=q.lte('created_at',closedAt); const r=await q; voids=r.count||0; }catch(e){}
+  return {count:I.length,omzet,byType,byMethod,online,disc,voids};
+}
+function shiftWaText(sh,a){
+  const o=SETTINGS.outlet||{}; const d=t=>t?new Date(t).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+  let t=`*LAPORAN TUTUP SHIFT*\n${o.name||'71 Kitchen'}\n================\nKasir : ${sh.cashier?sh.cashier.username:ME.username}\nBuka  : ${d(sh.opened_at)}\nTutup : ${d(sh.closed_at)}\n\n*KAS LACI*\nModal awal      ${rp(sh.opening_float)}\nPenjualan tunai ${rp(a.byMethod['tunai']||0)}\nPerkiraan kas   ${rp(sh.expected)}\nUang fisik      ${rp(sh.closing_count)}\nSelisih         ${Number(sh.variance)<0?'-':''}${rp(Math.abs(sh.variance))}\n\n*PENJUALAN*\nTransaksi: ${a.count} nota\nOmzet: ${rp(a.omzet)}`;
+  const M={tunai:'Tunai',qris:'QRIS',transfer:'Transfer',edc:'EDC'};
+  Object.keys(a.byMethod).forEach(k=>{ t+=`\n- ${M[k]||k}  ${rp(a.byMethod[k])}`; });
+  t+='\n\n*JENIS TRANSAKSI*';
+  Object.keys(a.byType).forEach(k=>{ t+=`\n- ${posTypeLabel(k)}: ${a.byType[k]}x`; });
+  if(Object.keys(a.online).length){ t+='\n\n*ONLINE (piutang platform)*'; Object.keys(a.online).forEach(k=>{ t+=`\n- ${posTypeLabel(k)}  ${rp(a.online[k])}`; }); }
+  t+=`\n\n*LAINNYA*\nDiskon & voucher: ${rp(a.disc)}\nItem void: ${a.voids}\n\nDitutup oleh ${ME.username}`;
+  return t;
+}
+async function waShift(i){
+  const sh=SHIFTHIST[i]; if(!sh)return;
+  const a=await shiftAgg(sh.id,sh.opened_at,sh.closed_at);
+  window.open('https://wa.me/?text='+encodeURIComponent(shiftWaText(sh,a)),'_blank');
 }
 
 /* ==================== POS POLISH: meja, void, piutang ==================== */
