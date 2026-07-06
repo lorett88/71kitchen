@@ -199,7 +199,7 @@ const LS_URL='kit_sb_url', LS_KEY='kit_sb_key';
 const DEFAULT_URL='https://ehorzoooqinfcmgyitju.supabase.co';
 const DEFAULT_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVob3J6b29vcWluZmNtZ3lpdGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjk0MjUsImV4cCI6MjA5ODIwNTQyNX0.Y8ME7LPHgoTayA1CwnC9Q3oXHHNE9G_s_lVHdNkxFPI';
 let sb=null, ME={username:'',role:'',id:''}, SETTINGS={}, POLL=null, SHIFT=null;
-const APP_VER='2026-07-06.5';
+const APP_VER='2026-07-06.6';
 document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VER);});
 /* Tabel responsif otomatis: tiap tabel diberi label kolom agar jadi kartu di layar kecil */
 function rspTables(){
@@ -541,9 +541,12 @@ async function viewDashboard(){
     .map(([l,v])=>`<div class="stat"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
   const lo=document.getElementById('low');
   if(!low.length){ lo.innerHTML='<div class="empty">Semua stok aman.</div>'; return; }
-  lo.innerHTML=`<table><thead><tr><th>Item</th><th>Tipe</th><th class="num">Stok</th><th class="num">Min</th></tr></thead><tbody>`+
-    low.map(x=>`<tr><td>${esc(x.n)}</td><td><span class="pill warn">${x.t}</span></td>
-      <td class="num">${esc(x.s)} ${esc(x.u)}</td><td class="num">${esc(x.m)} ${esc(x.u)}</td></tr>`).join('')+'</tbody></table>';
+  lo.innerHTML=low.map(x=>{
+    const b={'Bahan Baku':'BB','Bumbu':'BU','Produk':'P'}[x.t]||x.t;
+    return `<div class="lrow"><div class="lmain"><div class="lname">${esc(x.n)} <span class="pill warn" style="font-size:10px" title="${esc(x.t)}">${b}</span></div>
+      <div class="lmeta">minimum ${fmtn(x.m)} ${esc(x.u)}</div></div>
+      <div class="lright"><div class="lprice" style="color:var(--danger)">${fmtn(x.s)} ${esc(x.u)}</div><div style="font-size:11px;color:var(--muted)">sisa stok</div></div></div>`;
+  }).join('');
 }
 
 /* ---------- Impor Excel ---------- */
