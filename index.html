@@ -199,7 +199,7 @@ const LS_URL='kit_sb_url', LS_KEY='kit_sb_key';
 const DEFAULT_URL='https://ehorzoooqinfcmgyitju.supabase.co';
 const DEFAULT_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVob3J6b29vcWluZmNtZ3lpdGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjk0MjUsImV4cCI6MjA5ODIwNTQyNX0.Y8ME7LPHgoTayA1CwnC9Q3oXHHNE9G_s_lVHdNkxFPI';
 let sb=null, ME={username:'',role:'',id:''}, SETTINGS={}, POLL=null, SHIFT=null;
-const APP_VER='2026-07-06.12';
+const APP_VER='2026-07-06.13';
 document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VER);});
 /* Tabel responsif otomatis: tiap tabel diberi label kolom agar jadi kartu di layar kecil */
 function rspTables(){
@@ -526,8 +526,10 @@ async function restoreRow(table,id){
 async function viewDashboard(){
   const c=document.getElementById('content');
   c.innerHTML=`<div class="cards" id="stats"></div>
+    ${isMgr()?'<div class="pagehead"><h2>Permintaan Void</h2></div><div class="panel" id="vr-box" style="margin-bottom:16px"><div class="empty">Memuat...</div></div>':''}
     <div class="pagehead"><h2>Stok di bawah minimum</h2></div>
     <div class="panel" id="low"><div class="empty">Memuat...</div></div>`;
+  if(isMgr()) loadVoidReq();
   const [pr,raw,sea]=await Promise.all([
     sb.from('products').select('id,name,stock,min_stock,type'),
     sb.from('raw_materials').select('id,name,stock,min_stock,unit_use'),
@@ -808,14 +810,16 @@ async function posCreateOrder(){
   const {data,error}=await sb.from('orders').insert({sales_type:type,table_no:table,customer_name:cust,member_id:member?member.id:null,shift_id:SHIFT?SHIFT.id:null,guests_adult:ga,guests_child:gc}).select().single();
   if(error){ msg('po-msg','Gagal: '+error.message,'err'); return; }
   if(phone&&!member) msg('po-msg','Catatan: nomor member tidak ditemukan, lanjut tanpa member.','');
-  POS.orderId=data.id; POS.order=data; POS.items=[]; POS.member=member;
+  POS.orderId=data.id; POS.order=data; POS.items=[]; POS.member=member; POS.voidPend={};
   closeModal(); renderPosOpen(); renderPosGrid(); renderPosOrder();
 }
 async function posSelectOrder(id){
   const {data:o}=await sb.from('orders').select('*, member:members(id,name,phone,points,tier:membership_tiers(discount_pct,name))').eq('id',id).single();
   POS.orderId=id; POS.order=o; POS.member=o.member||null;
   const {data:items}=await sb.from('order_items').select('*').eq('order_id',id).order('id');
-  POS.items=items||[]; renderPosOpen(); renderPosGrid(); renderPosOrder();
+  POS.items=items||[];
+  try{ const {data:vr}=await sb.from('void_requests').select('order_item_id').eq('order_id',id).eq('status','pending'); POS.voidPend={}; (vr||[]).forEach(x=>POS.voidPend[x.order_item_id]=1); }catch(e){ POS.voidPend={}; }
+  renderPosOpen(); renderPosGrid(); renderPosOrder();
 }
 function renderPosCats(){ document.getElementById('pos-cats').innerHTML=POS.cats.map(ct=>
   `<button class="btn ${POS.cat===ct?'':'sec'} sm" onclick="POS.cat='${ct}';renderPosCats();renderPosGrid()">${ct==='all'?'Semua':esc(ct)}</button>`).join(''); }
@@ -905,7 +909,7 @@ function renderPosOrder(){
     rows+=`<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--line)">
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(p.name||i.name)}${i.takeaway?' <span class="pill" style="background:#fdf1e3;color:#9a5b1e;font-size:10px">Bungkus</span>':''}</div>
       <div style="font-size:12px;color:var(--muted)">${rp(price)}${i.sent?' · ✓ dapur':''}${i.sent?'':` · <a href="#" onclick="posToggleTA('${i.id}');return false" style="color:var(--teal)">${i.takeaway?'batal bungkus':'bungkus'}</a>`}</div></div>
-      ${i.sent?`<span style="font-size:13px">×${i.qty}</span><button class="btn danger sm" title="Void (otorisasi manager)" onclick="posVoidItem('${i.id}')">✕</button>`:
+      ${i.sent?((POS.voidPend&&POS.voidPend[i.id])?`<span style="font-size:13px">×${i.qty}</span><span class="pill warn" style="font-size:10px">Void diminta</span>`:`<span style="font-size:13px">×${i.qty}</span><button class="btn danger sm" title="Void (otorisasi manager)" onclick="posVoidItem('${i.id}')">✕</button>`):
         `<button class="btn sec sm" onclick="posQty('${i.id}',-1)">−</button><span style="min-width:18px;text-align:center">${i.qty}</span><button class="btn sec sm" onclick="posQty('${i.id}',1)">+</button>`}
       <div style="min-width:72px;text-align:right;font-size:13px">${rp(price*Number(i.qty))}</div></div>`;});
   const t=computeTotals();
@@ -1455,6 +1459,27 @@ async function loadKitchen(){
       <button class="btn ${((t.items||[]).length&&(t.items||[]).every(x=>x.done))?'':'sec'}" style="width:100%;margin-top:8px" onclick="kitDone('${t.id}')">Selesai — angkat tiket</button></div>`;
    }).join('')+'</div>';
 }
+async function loadVoidReq(){
+  const box=document.getElementById('vr-box'); if(!box)return;
+  const {data}=await sb.from('void_requests').select('*').eq('status','pending').order('created_at');
+  if(!data||!data.length){ box.innerHTML='<div class="empty">Tidak ada permintaan void.</div>'; return; }
+  box.innerHTML=data.map(v=>`<div class="lrow"><div class="lmain"><div class="lname">${esc(v.item_name)} ×${fmtn(v.qty)} <span class="pill warn" style="font-size:10px">Void</span></div>
+    <div class="lmeta">${[v.table_label,v.reason,'oleh '+(v.requested_by||'-'),new Date(v.created_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})].filter(Boolean).map(esc).join(' \u00b7 ')}</div></div>
+    <div class="lright"><div class="lbtns"><button class="btn sm" onclick="vrApprove('${v.id}','${v.order_item_id}')">Setujui</button><button class="btn danger sm" onclick="vrReject('${v.id}')">Tolak</button></div></div></div>`).join('');
+}
+async function vrApprove(id,itemId){
+  if(!confirm('Setujui void item ini? Item akan dihapus dari pesanan.'))return;
+  await sb.from('order_items').delete().eq('id',itemId);
+  try{ await sb.from('activity_log').insert({action:'void_item',detail:{order_item:itemId,via:'remote',by:ME.username}}); }catch(e){}
+  const {error}=await sb.from('void_requests').update({status:'approved',decided_by:ME.username,decided_at:new Date().toISOString()}).eq('id',id);
+  if(error){ alert(error.message); return; }
+  loadVoidReq();
+}
+async function vrReject(id){
+  const {error}=await sb.from('void_requests').update({status:'rejected',decided_by:ME.username,decided_at:new Date().toISOString()}).eq('id',id);
+  if(error){ alert(error.message); return; }
+  loadVoidReq();
+}
 async function kitDone(id){ const {error}=await sb.from('kitchen_tickets').update({status:'done'}).eq('id',id); if(error){alert(error.message);return;} loadKitchen(); }
 async function kitToggle(itemId,val){
   const {error}=await sb.from('kitchen_ticket_items').update({done:val}).eq('id',itemId);
@@ -1947,9 +1972,23 @@ async function posSplitSave(){
 /* Void item yang sudah ke dapur — perlu otorisasi manager */
 function posVoidItem(id){
   if(isMgr()){ const reason=prompt('Alasan void item (sudah masuk dapur):'); if(reason===null)return; doVoidItem(id,reason,ME.username); return; }
-  openModal(`<h2 style="margin-bottom:8px">Void Item — Otorisasi Manager</h2><p style="margin-top:0;color:var(--muted);font-size:13px">Item sudah dikirim ke dapur. Diperlukan persetujuan manager/owner.</p>
-   ${field('Alasan',`<input id="vd_reason">`)}${field('Username manager',`<input id="vd_user">`)}${field('Password manager',`<input id="vd_pass" type="password">`)}
-   <div id="vd-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn danger" onclick="voidConfirm('${id}')">Void</button></div>`);
+  openModal(`<h2 style="margin-bottom:8px">Void Item — Otorisasi Manager</h2><p style="margin-top:0;color:var(--muted);font-size:13px">Item sudah dikirim ke dapur. Ajukan ke manager (bisa disetujui dari jauh lewat Dashboard manager), atau minta manager memasukkan password di sini.</p>
+   ${field('Alasan void',`<input id="vd_reason" placeholder="mis. salah input / customer batal">`)}
+   <button class="btn" style="width:100%" onclick="voidRequest('${id}')">Ajukan ke Manager (jarak jauh)</button>
+   <div style="text-align:center;color:var(--muted);font-size:12px;margin:10px 0">— atau manager di tempat —</div>
+   <div class="grid2">${field('Username manager',`<input id="vd_user">`)}${field('Password manager',`<input id="vd_pass" type="password">`)}</div>
+   <div id="vd-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn danger" onclick="voidConfirm('${id}')">Void Sekarang</button></div>`);
+}
+async function voidRequest(id){
+  const reason=document.getElementById('vd_reason').value.trim();
+  if(!reason){ msg('vd-msg','Isi alasan dulu.','err'); return; }
+  const i=POS.items.find(x=>x.id===id); const p=i?(POS.products.find(x=>x.id===i.product_id)||{}):{};
+  const o=POS.order||{}; const lbl=o.table_no?('Meja '+o.table_no):(o.customer_name||'');
+  msg('vd-msg','Mengirim permintaan...','');
+  const {error}=await sb.from('void_requests').insert({order_id:POS.orderId,order_item_id:id,item_name:p.name||i.name||'(item)',qty:i?i.qty:1,table_label:lbl,reason,requested_by:ME.username});
+  if(error){ msg('vd-msg','Gagal: '+error.message,'err'); return; }
+  POS.voidPend=POS.voidPend||{}; POS.voidPend[id]=1;
+  closeModal(); renderPosOrder();
 }
 async function voidConfirm(id){
   const reason=document.getElementById('vd_reason').value.trim(), user=document.getElementById('vd_user').value.trim(), pass=document.getElementById('vd_pass').value;
