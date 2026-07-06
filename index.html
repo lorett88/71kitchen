@@ -199,7 +199,7 @@ const LS_URL='kit_sb_url', LS_KEY='kit_sb_key';
 const DEFAULT_URL='https://ehorzoooqinfcmgyitju.supabase.co';
 const DEFAULT_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVob3J6b29vcWluZmNtZ3lpdGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjk0MjUsImV4cCI6MjA5ODIwNTQyNX0.Y8ME7LPHgoTayA1CwnC9Q3oXHHNE9G_s_lVHdNkxFPI';
 let sb=null, ME={username:'',role:'',id:''}, SETTINGS={}, POLL=null, SHIFT=null;
-const APP_VER='2026-07-06.4';
+const APP_VER='2026-07-06.5';
 document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VER);});
 /* Tabel responsif otomatis: tiap tabel diberi label kolom agar jadi kartu di layar kecil */
 function rspTables(){
@@ -1275,11 +1275,12 @@ function renderPurModal(){
     </div>`;
   };
   const keepP=(id,def)=>{const el=document.getElementById(id);return el!=null?el.value:def;};
-  const vSup=keepP('pu_sup',''), vType=keepP('pu_type','cash'), vDue=keepP('pu_due',''), vRet=keepP('pu_ret','0'), vProof=keepP('pu_proof',''), vNote=keepP('pu_note','');
+  const vSup=keepP('pu_sup',''), vType=keepP('pu_type','cash'), vDue=keepP('pu_due',''), vRet=keepP('pu_ret','0'), vProof=keepP('pu_proof',''), vNote=keepP('pu_note',''), vAcct=keepP('pu_acct',opAcct());
   document.getElementById('pur-body').innerHTML=`<h2 style="margin-bottom:12px">Pembelian Baru</h2>
    <div class="grid2">${field('Supplier',`<select id="pu_sup"><option value="">— tanpa supplier —</option>${S3.sup.map(s=>`<option value="${s.id}" ${vSup===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select>`)}
-   ${field('Tipe bayar',`<select id="pu_type" onchange="document.getElementById('pu_due_w').style.display=this.value==='tempo'?'block':'none'"><option value="cash" ${vType==='cash'?'selected':''}>Tunai</option><option value="tempo" ${vType==='tempo'?'selected':''}>Tempo</option></select>`)}</div>
+   ${field('Tipe bayar',`<select id="pu_type" onchange="document.getElementById('pu_due_w').style.display=this.value==='tempo'?'block':'none';document.getElementById('pu_acct_w').style.display=this.value==='tempo'?'none':'block'"><option value="cash" ${vType==='cash'?'selected':''}>Tunai</option><option value="tempo" ${vType==='tempo'?'selected':''}>Tempo</option></select>`)}</div>
    <div id="pu_due_w" style="display:${vType==='tempo'?'block':'none'}">${field('Jatuh tempo',`<input id="pu_due" type="date" value="${esc(vDue)}">`)}</div>
+   <div id="pu_acct_w" style="display:${vType==='tempo'?'none':'block'}">${field('Dibayar dari',`<select id="pu_acct">${acctOpts(vAcct)}</select>`)}</div>
    <div style="font-size:13px;color:var(--muted);margin:8px 0">Pilih barang, lalu isi <b>Jumlah beli</b> dan <b>Harga satuan</b>-nya. Jumlah boleh desimal (mis. 0,5 kg).</div>${PURLINES.map(line).join('')}
    <button class="btn ghost sm" onclick="PURLINES.push({cat:'raw',item_id:'',qty:1,unit_cost:0});renderPurModal()">+ Tambah item</button>
    <div class="grid2" style="margin-top:10px">${field('Sisa uang kembali (Rp)',`<input id="pu_ret" type="text" inputmode="numeric" value="${esc(vRet)}">`)}${field('Bukti (URL, opsional)',`<input id="pu_proof" value="${esc(vProof)}">`)}</div>
@@ -1294,6 +1295,7 @@ async function purSave(){
   const type=document.getElementById('pu_type').value, total=lines.reduce((s,l)=>s+l.qty*l.unit_cost,0);
   msg('pu-msg','Menyimpan...','');
   const {data,error}=await sb.from('purchases').insert({supplier_id:document.getElementById('pu_sup').value||null,pay_type:type,total,
+    pay_account_id:type==='cash'?(document.getElementById('pu_acct').value||null):null,
     due_date:type==='tempo'?(document.getElementById('pu_due').value||null):null,returned_cash:Number(document.getElementById('pu_ret').value)||0,
     proof_url:document.getElementById('pu_proof').value||null,note:document.getElementById('pu_note').value||null}).select().single();
   if(error){ msg('pu-msg','Gagal: '+error.message,'err'); return; }
@@ -1319,8 +1321,9 @@ function expNew(){
   openModal(`<h2 style="margin-bottom:12px">Pengeluaran Baru</h2>
    <div class="grid2">${field('Kategori',`<select id="ex_cat">${S3.ecat.map(c=>`<option value="${c.name}">${esc(c.name)}</option>`).join('')}</select>`)}
    ${field('Jumlah (Rp)',`<input id="ex_amt" type="text" inputmode="numeric">`)}
-   ${field('Tipe bayar',`<select id="ex_type" onchange="document.getElementById('ex_due_w').style.display=this.value==='tempo'?'block':'none'"><option value="cash">Tunai</option><option value="tempo">Tempo</option></select>`)}
+   ${field('Tipe bayar',`<select id="ex_type" onchange="document.getElementById('ex_due_w').style.display=this.value==='tempo'?'block':'none';document.getElementById('ex_acct_w').style.display=this.value==='tempo'?'none':'block'"><option value="cash">Tunai</option><option value="tempo">Tempo</option></select>`)}
    ${field('Bukti (URL, opsional)',`<input id="ex_proof">`)}</div>
+   <div id="ex_acct_w">${field('Dibayar dari',`<select id="ex_acct">${acctOpts(opAcct())}</select>`)}</div>
    <div id="ex_due_w" style="display:none">${field('Jatuh tempo',`<input id="ex_due" type="date">`)}</div>${field('Catatan',`<input id="ex_note">`)}
    <div id="ex-msg" class="msg"></div>
    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="expSave()">Simpan (minta otorisasi)</button></div>`);
@@ -1331,6 +1334,7 @@ async function expSave(){
   const type=document.getElementById('ex_type').value;
   msg('ex-msg','Menyimpan...','');
   const {error}=await sb.from('expenses').insert({category:document.getElementById('ex_cat').value,amount:amt,pay_type:type,
+    pay_account_id:type==='cash'?(document.getElementById('ex_acct').value||null):null,
     due_date:type==='tempo'?(document.getElementById('ex_due').value||null):null,proof_url:document.getElementById('ex_proof').value||null,note:document.getElementById('ex_note').value||null});
   if(error){ msg('ex-msg','Gagal: '+error.message,'err'); return; }
   closeModal(); viewExpense();
@@ -1382,7 +1386,7 @@ async function viewCash(){
   await s3load(['acct']);
   const cards=S3.acct.map(a=>`<div class="stat"><div class="lbl">${esc(a.name)}</div><div class="val">${rp(a.balance)}</div></div>`).join('');
   document.getElementById('content').innerHTML=`<div class="pagehead"><h2>Kas</h2><div style="display:flex;gap:8px;flex-wrap:wrap">
-     <button class="btn sec" onclick="cashIn()">Terima dari Owner</button><button class="btn sec" onclick="cashTransferM()">Setor ke Rekening</button></div></div>
+     <button class="btn sec" onclick="cashIn()">Terima dana</button><button class="btn" onclick="cashTransferM()">Transfer / Setor</button></div></div>
    <div class="cards">${cards}</div>
    <div class="pagehead"><h3>Hutang (tempo)</h3></div><div class="panel" id="pay-tbl"><div class="empty">Memuat...</div></div>
    <div class="pagehead" style="margin-top:18px"><h3>Piutang Online (platform)</h3></div><div class="panel" id="rcv-tbl"><div class="empty">Memuat...</div></div>
@@ -1405,11 +1409,19 @@ async function viewCash(){
    mv.map(m=>`<tr><td>${new Date(m.created_at).toLocaleString('id-ID')}</td><td>${esc(m.account?m.account.name:'')}</td><td>${m.direction==='in'?'Masuk':'Keluar'}</td><td class="num">${rp(m.amount)}</td><td>${esc(m.reason||'')}</td></tr>`).join('')+'</tbody></table>';
 }
 const tunaiAcct=()=>(S3.acct.find(a=>a.kind==='tunai')||{}).id;
+const opAcct=()=>{const a=S3.acct.find(x=>/operasional/i.test(x.name||''));return a?a.id:tunaiAcct();};
+const acctOpts=(sel)=>S3.acct.map(a=>`<option value="${a.id}" ${sel===a.id?'selected':''}>${esc(a.name)} (${rp(a.balance)})</option>`).join('');
 const rekAcct=()=>(S3.acct.find(a=>a.kind==='rekening')||{}).id;
-function cashIn(){ openModal(`<h2 style="margin-bottom:12px">Terima kas dari Owner</h2>${field('Jumlah (Rp)',`<input id="ci_amt" type="text" inputmode="numeric">`)}${field('Keterangan',`<input id="ci_note" value="Tambahan kas dari Owner">`)}<div id="ci-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="cashInSave()">Simpan</button></div>`); }
-async function cashInSave(){const a=Number(document.getElementById('ci_amt').value);if(!a){msg('ci-msg','Isi jumlah.','err');return;}const {error}=await sb.rpc('cash_adjust',{p_account:tunaiAcct(),p_dir:'in',p_amount:a,p_reason:document.getElementById('ci_note').value||'Kas masuk'});if(error){msg('ci-msg','Gagal: '+error.message,'err');return;}closeModal();viewCash();}
-function cashTransferM(){ openModal(`<h2 style="margin-bottom:12px">Setor ke Rekening</h2>${field('Jumlah (Rp)',`<input id="ct_amt" type="text" inputmode="numeric">`)}${field('Keterangan',`<input id="ct_note" value="Setor pendapatan">`)}<div id="ct-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="cashTransferSave()">Setor</button></div>`); }
-async function cashTransferSave(){const a=Number(document.getElementById('ct_amt').value);if(!a){msg('ct-msg','Isi jumlah.','err');return;}const {error}=await sb.rpc('cash_transfer',{p_from:tunaiAcct(),p_to:rekAcct(),p_amount:a,p_reason:document.getElementById('ct_note').value||'Setor'});if(error){msg('ct-msg','Gagal: '+error.message,'err');return;}closeModal();viewCash();}
+function cashIn(){ openModal(`<h2 style="margin-bottom:12px">Terima dana masuk</h2>${field('Masuk ke akun',`<select id="ci_acct">${acctOpts(tunaiAcct())}</select>`)}${field('Jumlah (Rp)',`<input id="ci_amt" type="text" inputmode="numeric">`)}${field('Keterangan',`<input id="ci_note" value="Tambahan dana dari Owner">`)}<div id="ci-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="cashInSave()">Simpan</button></div>`); }
+async function cashInSave(){const a=Number(document.getElementById('ci_amt').value);if(!a){msg('ci-msg','Isi jumlah.','err');return;}const {error}=await sb.rpc('cash_adjust',{p_account:document.getElementById('ci_acct').value,p_dir:'in',p_amount:a,p_reason:document.getElementById('ci_note').value||'Dana masuk'});if(error){msg('ci-msg','Gagal: '+error.message,'err');return;}closeModal();viewCash();}
+function cashTransferM(){ openModal(`<h2 style="margin-bottom:12px">Transfer / Setor antar akun</h2>
+  ${field('Dari akun',`<select id="ct_from">${acctOpts(tunaiAcct())}</select>`)}
+  ${field('Ke akun',`<select id="ct_to">${acctOpts(rekAcct())}</select>`)}
+  ${field('Jumlah (Rp)',`<input id="ct_amt" type="text" inputmode="numeric">`)}
+  ${field('Keterangan',`<input id="ct_note" value="Setor pendapatan harian">`)}
+  <div style="font-size:12px;color:var(--muted);margin-top:4px">Contoh alur: Kas → Rekening Utama (setoran harian) · Rekening Utama → Rekening Operasional (isi dana operasional).</div>
+  <div id="ct-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="cashTransferSave()">Transfer</button></div>`); }
+async function cashTransferSave(){const a=inum(document.getElementById('ct_amt').value);const f=document.getElementById('ct_from').value,t=document.getElementById('ct_to').value;if(!a){msg('ct-msg','Isi jumlah.','err');return;}if(f===t){msg('ct-msg','Akun asal dan tujuan tidak boleh sama.','err');return;}const {error}=await sb.rpc('cash_transfer',{p_from:f,p_to:t,p_amount:a,p_reason:document.getElementById('ct_note').value||'Transfer antar akun'});if(error){msg('ct-msg','Gagal: '+error.message,'err');return;}closeModal();viewCash();}
 function payNow(id,remain){ openModal(`<h2 style="margin-bottom:12px">Bayar Hutang</h2>${field('Jumlah bayar (Rp)',`<input id="pp_amt" type="text" inputmode="numeric" value="${Math.round(remain)}">`)}${field('Dari akun',`<select id="pp_acct">${S3.acct.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select>`)}<div id="pp-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="payNowSave('${id}')">Bayar</button></div>`); }
 async function payNowSave(id){const a=Number(document.getElementById('pp_amt').value);if(!a){msg('pp-msg','Isi jumlah.','err');return;}const {error}=await sb.rpc('pay_payable',{p_id:id,p_amount:a,p_account:document.getElementById('pp_acct').value});if(error){msg('pp-msg','Gagal: '+error.message,'err');return;}closeModal();viewCash();}
 
