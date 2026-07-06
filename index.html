@@ -907,7 +907,7 @@ async function posConfirmPay(){
 function printHTML(html){
   const f=document.createElement('iframe'); f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';
   document.body.appendChild(f); const d=f.contentWindow.document; d.open();
-  d.write('<html><head><meta charset="utf-8"><style>body{font-family:monospace;font-size:12px;color:#000;width:280px;margin:0 auto;padding:8px}.c{text-align:center}.r{display:flex;justify-content:space-between}.b{border-top:1px dashed #000;margin:6px 0}hr{border:none;border-top:1px solid #000;margin:6px 0}</style></head><body>'+html+'</body></html>');
+  d.write('<html><head><meta charset="utf-8"><style>@page{size:58mm auto;margin:0}html,body{width:58mm;margin:0 auto}body{font-family:monospace;font-size:11px;color:#000;padding:2mm 3mm}.c{text-align:center}.r{display:flex;justify-content:space-between}.b{border-top:1px dashed #000;margin:6px 0}hr{border:none;border-top:1px solid #000;margin:6px 0}@media screen{body{width:280px;padding:8px}}</style></head><body>'+html+'</body></html>');
   d.close(); setTimeout(()=>{f.contentWindow.focus();f.contentWindow.print();setTimeout(()=>f.remove(),800);},250);
 }
 const outletHTML=()=>{const o=SETTINGS.outlet||{};return `<div class="c"><b>${esc(o.name||'71 Kitchen')}</b></div><div class="c" style="font-size:11px">${esc(o.address||'')}</div><div class="c" style="font-size:11px">${esc(o.phone||'')}</div>`;};
@@ -980,7 +980,31 @@ function printThermal(text,cb){
   if(!pr){ alert('Printer belum dipilih. Buka menu Printer untuk memilih printer dulu.'); return; }
   btPrint(text,pr.id,function(ok,err){ if(ok){ if(cb)cb(); } else { alert('Gagal cetak: '+((err&&err.error)||err||'')+'. Pastikan printer menyala & sudah ter-pair, lalu coba lagi.'); } });
 }
-function emitPrint(html,text){ if(btReady()&&getPrinter()){ printThermal(text); } else { printHTML(html); } }
+function emitPrint(html,text){
+  if(btReady()&&getPrinter()){ printThermal(text); return; }
+  if(!btReady()&&webPrintMode()==='rawbt'){ rawbtPrint(text); return; }
+  printHTML(html);
+}
+/* ---- Cetak dari web ---- */
+function webPrintMode(){ try{ return localStorage.getItem('webprint71')||'dialog'; }catch(e){ return 'dialog'; } }
+function setWebPrintMode(m){ try{ localStorage.setItem('webprint71',m); }catch(e){} }
+// Ubah markup thermal ([L]/[C]/[R], <b>) jadi teks polos rata 32 kolom untuk RawBT
+function tPlain(text){
+  const strip=s=>String(s).replace(/<[^>]+>/g,'');
+  return text.split('\n').map(ln=>{
+    if(!ln)return '';
+    const lr=ln.match(/^\[L\](.*)\[R\](.*)$/);
+    if(lr){ const l=strip(lr[1]),r=strip(lr[2]); const pad=Math.max(1,TPW-l.length-r.length); return l+' '.repeat(pad)+r; }
+    if(ln.startsWith('[C]')){ const s=strip(ln.slice(3)); return ' '.repeat(Math.max(0,Math.floor((TPW-s.length)/2)))+s; }
+    if(ln.startsWith('[R]')){ const s=strip(ln.slice(3)); return ' '.repeat(Math.max(0,TPW-s.length))+s; }
+    if(ln.startsWith('[L]'))return strip(ln.slice(3));
+    return strip(ln);
+  }).join('\n');
+}
+function rawbtPrint(text){
+  const plain=tPlain(text)+'\n\n\n';
+  location.href='intent:'+encodeURIComponent(plain)+'#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
+}
 function tInvoice(res,items,t,payments){
   const no=(res&&res.invoice_no)||'';
   let s=tOutlet()+tDiv()+tLR('No Nota',String(no))+tLR('Kasir',tEsc(ME.username))+tLR('Tipe',posTypeLabel(t.sales_type))+tDiv()+tItems(items)+tDiv()+tLR('Subtotal',rp(t.subtotal));
@@ -1011,18 +1035,27 @@ function tTicket(tk,its){
 }
 let PR_LIST=[];
 function viewPrinter(){
-  const pr=getPrinter(), native=btReady();
+  const pr=getPrinter(), native=btReady(), wm=webPrintMode();
   document.getElementById('content').innerHTML=`
     <div class="pagehead"><h2>Printer</h2></div>
     <div class="panel" style="padding:20px;max-width:560px">
-      ${native?'':`<div style="background:#fcefe2;color:#8a4b00;padding:10px 12px;border-radius:8px;margin-bottom:14px;font-size:13px">Fitur printer Bluetooth hanya aktif di aplikasi Android (APK). Di browser, struk dicetak lewat dialog cetak biasa.</div>`}
+      ${native?`
       <div style="margin-bottom:12px">Printer terpilih: <b id="pr-cur">${pr?esc(pr.name||pr.id):'belum ada'}</b></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
         <button class="btn" onclick="prScan()">Cari printer</button>
         <button class="btn ghost" onclick="prTest()">Tes cetak</button>
         <button class="btn ghost" onclick="prTestFirst()">Tes alternatif</button>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Pastikan printer sudah di-pair lebih dulu lewat Pengaturan Bluetooth HP.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Pastikan printer sudah di-pair lebih dulu lewat Pengaturan Bluetooth HP. Cetak langsung ke printer Bluetooth — tanpa aplikasi tambahan.</div>`
+      :`
+      <div style="background:#eef4f3;border:1px solid var(--line);padding:10px 12px;border-radius:8px;margin-bottom:14px;font-size:13px">Ini <b>versi web</b>. Browser tidak mengizinkan akses langsung ke printer Bluetooth — itu aturan semua browser, bukan gangguan aplikasi. <b>Aplikasi APK di HP kasir tetap mencetak langsung ke Bluetooth seperti biasa.</b></div>
+      ${field('Mode cetak di web ini',`<select id="pr_webmode" onchange="setWebPrintMode(this.value);viewPrinter()">
+        <option value="dialog" ${wm==='dialog'?'selected':''}>Dialog cetak (bawaan)</option>
+        <option value="rawbt" ${wm==='rawbt'?'selected':''}>RawBT — printer Bluetooth (Android)</option></select>`)}
+      ${wm==='rawbt'
+        ?`<div style="font-size:12px;color:var(--muted);margin:8px 0 12px">Struk dikirim ke aplikasi <b>RawBT</b> lalu keluar di printer thermal Bluetooth. Sekali saja: install "RawBT" dari Play Store → buka → pilih printer Bluetooth kamu di pengaturannya. Berfungsi di HP/tablet Android.</div>`
+        :`<div style="font-size:12px;color:var(--muted);margin:8px 0 12px">Struk keluar lewat jendela cetak browser — bisa ke printer biasa, printer thermal yang terpasang di komputer (USB), atau disimpan PDF. Ukuran sudah diatur untuk kertas 58mm.</div>`}
+      <button class="btn ghost" onclick="prTest()">Tes cetak</button>`}
       <div id="pr-list"></div>
       <div id="pr-msg" class="msg"></div>
     </div>`;
@@ -1053,11 +1086,16 @@ function prShowList(list){
 }
 function prPick(i){ const p=PR_LIST[i]; if(!p)return; const obj={id:p.address||p.id||p.name,name:p.name||p.address||p.id}; setPrinter(obj); const el=document.getElementById('pr-cur'); if(el)el.textContent=obj.name||obj.id; msg('pr-msg','Printer disimpan: '+(obj.name||obj.id),'ok'); }
 function prTest(){
-  if(!btReady()){ msg('pr-msg','Hanya tersedia di aplikasi (APK).','err'); return; }
-  if(!getPrinter()){ msg('pr-msg','Pilih printer dulu (Cari printer).','err'); return; }
-  msg('pr-msg','Mengirim tes cetak (auto-retry)...','');
   const s=tOutlet()+tDiv()+tC('TES CETAK')+tLR('Kiri','Kanan')+'[L]<b>Tebal</b> normal\n'+tDiv()+tC('58mm OK');
-  btPrint(s,getPrinter().id,function(ok,err){ msg('pr-msg', ok?'Berhasil terkirim ke printer.':'Gagal: '+((err&&err.error)||err||'')+'. Coba "Tes alternatif", atau matikan-nyalakan printer.', ok?'ok':'err'); });
+  if(btReady()){
+    if(!getPrinter()){ msg('pr-msg','Pilih printer dulu (Cari printer).','err'); return; }
+    msg('pr-msg','Mengirim tes cetak (auto-retry)...','');
+    btPrint(s,getPrinter().id,function(ok,err){ msg('pr-msg', ok?'Berhasil terkirim ke printer.':'Gagal: '+((err&&err.error)||err||'')+'. Coba "Tes alternatif", atau matikan-nyalakan printer.', ok?'ok':'err'); });
+    return;
+  }
+  const h=outletHTML()+'<hr><div class="c"><b>TES CETAK</b></div>'+RL('Kiri','Kanan')+'<div><b>Tebal</b> normal</div><hr><div class="c">58mm OK</div>';
+  emitPrint(h,s);
+  msg('pr-msg','Tes dikirim lewat mode '+(webPrintMode()==='rawbt'?'RawBT':'dialog cetak')+'.','ok');
 }
 function prTestFirst(){
   if(!btReady()){ msg('pr-msg','Hanya tersedia di aplikasi (APK).','err'); return; }
