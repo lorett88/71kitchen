@@ -116,9 +116,15 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
     table{white-space:nowrap}
     .cards{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
   }
+  #rotate-lock{display:none}
+  @media (hover:none) and (pointer:coarse) and (orientation:landscape){
+    #rotate-lock{display:flex;position:fixed;inset:0;z-index:99999;background:var(--teal);color:#fff;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:28px}
+  }
 </style>
 </head>
 <body>
+
+<div id="rotate-lock"><div style="font-size:44px">📱</div><b style="font-size:17px">Putar perangkat ke posisi tegak</b><span style="font-size:13px;opacity:.85">Aplikasi ini dirancang untuk mode portrait.</span></div>
 
 <!-- CONFIG -->
 <div id="screen-config" class="auth" style="display:none">
@@ -982,11 +988,42 @@ function printThermal(text,cb){
 }
 function emitPrint(html,text){
   if(btReady()&&getPrinter()){ printThermal(text); return; }
-  if(!btReady()&&webPrintMode()==='rawbt'){ rawbtPrint(text); return; }
+  if(!btReady()){
+    const m=webPrintMode();
+    if(m==='webbt'&&hasWebBT()){ wbtPrint(text).catch(e=>{ if(e&&e.name==='NotFoundError')return; alert('Gagal cetak Bluetooth: '+((e&&e.message)||e)+'\n\nBuka menu Printer > Hubungkan Printer, lalu coba lagi. Atau ganti mode cetak.'); }); return; }
+    if(m==='rawbt'){ rawbtPrint(text); return; }
+  }
   printHTML(html);
 }
+/* ---- Web Bluetooth (BLE): cetak langsung dari web, tanpa aplikasi tambahan ---- */
+let WBT={dev:null,ch:null};
+const WBT_SERVICES=[0x18f0,0xff00,0xffe0,0xfee7,0xff10,'49535343-fe7d-4ae5-8fa9-9fafd205e455','0000ff00-0000-1000-8000-00805f9b34fb','e7810a71-73ae-499d-8c15-faa9aef0c3f2'];
+const hasWebBT=()=>!!(navigator.bluetooth);
+function escposBytes(plain){ const b=[0x1b,0x40]; for(let i=0;i<plain.length;i++){ const c=plain.charCodeAt(i); b.push(c>255?63:c); } b.push(0x0a,0x0a,0x0a,0x0a); return new Uint8Array(b); }
+async function wbtConnect(){
+  const dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:WBT_SERVICES});
+  const server=await dev.gatt.connect();
+  const svcs=await server.getPrimaryServices();
+  let ch=null;
+  for(const s of svcs){ let cs=[]; try{ cs=await s.getCharacteristics(); }catch(e){ continue; }
+    for(const c of cs){ if(c.properties.write||c.properties.writeWithoutResponse){ ch=c; break; } } if(ch)break; }
+  if(!ch) throw new Error('Printer tersambung tapi tidak ada saluran tulis yang cocok.');
+  dev.addEventListener('gattserverdisconnected',()=>{ WBT.ch=null; });
+  WBT.dev=dev; WBT.ch=ch; return dev.name||'Printer';
+}
+async function wbtWrite(data){ const S=180; for(let i=0;i<data.length;i+=S){ const c=data.slice(i,i+S);
+  if(WBT.ch.properties.writeWithoutResponse) await WBT.ch.writeValueWithoutResponse(c); else await WBT.ch.writeValue(c);
+  await new Promise(r=>setTimeout(r,20)); } }
+async function wbtPrint(text){
+  if(!WBT.ch||!WBT.dev||!WBT.dev.gatt||!WBT.dev.gatt.connected){ await wbtConnect(); }
+  await wbtWrite(escposBytes(tPlain(text)));
+}
+async function prConnectWBT(){
+  try{ msg('pr-msg','Memilih printer... (pilih dari daftar yang muncul)',''); const n=await wbtConnect(); msg('pr-msg','Tersambung: '+n,'ok'); }
+  catch(e){ if(e&&e.name==='NotFoundError'){ msg('pr-msg','',''); return; } msg('pr-msg','Gagal menyambung: '+((e&&e.message)||e),'err'); }
+}
 /* ---- Cetak dari web ---- */
-function webPrintMode(){ try{ return localStorage.getItem('webprint71')||'dialog'; }catch(e){ return 'dialog'; } }
+function webPrintMode(){ try{ const v=localStorage.getItem('webprint71'); if(v)return v; }catch(e){} return (typeof navigator!=='undefined'&&/android/i.test(navigator.userAgent)&&navigator.bluetooth)?'webbt':'dialog'; }
 function setWebPrintMode(m){ try{ localStorage.setItem('webprint71',m); }catch(e){} }
 // Ubah markup thermal ([L]/[C]/[R], <b>) jadi teks polos rata 32 kolom untuk RawBT
 function tPlain(text){
@@ -1048,14 +1085,22 @@ function viewPrinter(){
       </div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Pastikan printer sudah di-pair lebih dulu lewat Pengaturan Bluetooth HP. Cetak langsung ke printer Bluetooth — tanpa aplikasi tambahan.</div>`
       :`
-      <div style="background:#eef4f3;border:1px solid var(--line);padding:10px 12px;border-radius:8px;margin-bottom:14px;font-size:13px">Ini <b>versi web</b>. Browser tidak mengizinkan akses langsung ke printer Bluetooth — itu aturan semua browser, bukan gangguan aplikasi. <b>Aplikasi APK di HP kasir tetap mencetak langsung ke Bluetooth seperti biasa.</b></div>
-      ${field('Mode cetak di web ini',`<select id="pr_webmode" onchange="setWebPrintMode(this.value);viewPrinter()">
-        <option value="dialog" ${wm==='dialog'?'selected':''}>Dialog cetak (bawaan)</option>
-        <option value="rawbt" ${wm==='rawbt'?'selected':''}>RawBT — printer Bluetooth (Android)</option></select>`)}
-      ${wm==='rawbt'
-        ?`<div style="font-size:12px;color:var(--muted);margin:8px 0 12px">Struk dikirim ke aplikasi <b>RawBT</b> lalu keluar di printer thermal Bluetooth. Sekali saja: install "RawBT" dari Play Store → buka → pilih printer Bluetooth kamu di pengaturannya. Berfungsi di HP/tablet Android.</div>`
-        :`<div style="font-size:12px;color:var(--muted);margin:8px 0 12px">Struk keluar lewat jendela cetak browser — bisa ke printer biasa, printer thermal yang terpasang di komputer (USB), atau disimpan PDF. Ukuran sudah diatur untuk kertas 58mm.</div>`}
-      <button class="btn ghost" onclick="prTest()">Tes cetak</button>`}
+      ${field('Mode cetak',`<select id="pr_webmode" onchange="setWebPrintMode(this.value);viewPrinter()">
+        ${hasWebBT()?`<option value="webbt" ${wm==='webbt'?'selected':''}>Bluetooth langsung (tanpa aplikasi)</option>`:''}
+        <option value="dialog" ${wm==='dialog'?'selected':''}>Dialog cetak browser</option>
+        <option value="rawbt" ${wm==='rawbt'?'selected':''}>RawBT (Android)</option></select>`)}
+      ${wm==='webbt'&&hasWebBT()?`
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
+        <button class="btn" onclick="prConnectWBT()">Hubungkan Printer</button>
+        <button class="btn ghost" onclick="prTest()">Tes cetak</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Cetak <b>langsung ke printer thermal Bluetooth</b> dari Chrome/Edge (Android & PC) — tanpa aplikasi tambahan. Nyalakan printer → tekan <b>Hubungkan Printer</b> → pilih printer dari daftar (cukup sekali tiap sesi/buka aplikasi). Setelah itu struk transaksi langsung keluar. Catatan: tidak tersedia di iPhone/Safari.</div>`
+      :wm==='rawbt'?`
+      <div style="margin:10px 0"><button class="btn ghost" onclick="prTest()">Tes cetak</button></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Struk dikirim ke aplikasi <b>RawBT</b> lalu keluar di printer thermal Bluetooth. Sekali saja: install "RawBT" dari Play Store → buka → pilih printer Bluetooth kamu di pengaturannya.</div>`
+      :`
+      <div style="margin:10px 0"><button class="btn ghost" onclick="prTest()">Tes cetak</button></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Struk keluar lewat jendela cetak browser — ke printer biasa, printer thermal USB di komputer, atau simpan PDF. Ukuran sudah diatur untuk kertas 58mm.</div>`}`}
       <div id="pr-list"></div>
       <div id="pr-msg" class="msg"></div>
     </div>`;
@@ -1780,6 +1825,7 @@ async function compoAddBundle(){
 }
 async function compoDelBundle(id){ await sb.from('bundle_items').delete().eq('id',id); renderCompo(); }
 
+try{ if(screen.orientation&&screen.orientation.lock){ screen.orientation.lock('portrait').catch(()=>{}); } }catch(e){}
 if(window.supabase){ boot(); }
 else {
   document.body.innerHTML='<div style="font-family:system-ui,-apple-system,sans-serif;max-width:380px;margin:16vh auto 0;text-align:center;padding:24px;color:#1f2421">'
