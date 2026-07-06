@@ -228,7 +228,7 @@ function refreshProductFields(){
     {k:'kitchen',l:'Dapur',type:'select',opts:['','Makanan','Bakaran','Minuman']},
     {k:'price_dinein',l:'Harga',type:'num'}
   ];
-  activeChannels().forEach(c=>{ if(c.base||c.sameAsBase)return; f.push({k:c.field,l:'Harga '+c.label,type:'num',hint:'kosongkan jika produk ini tidak dijual di '+c.label}); });
+  CHANNELS.forEach(c=>{ if(c.base||c.sameAsBase)return; f.push({k:c.field,l:'Harga '+c.label,type:'num',hint:'kosongkan = ikut Harga dasar'}); });
   f.push({k:'stock',l:'Stok (utk Jadi)',type:'num'},{k:'min_stock',l:'Stok Min',type:'num'},{k:'available',l:'Tersedia',type:'bool'});
   if(typeof CFG!=='undefined'&&CFG.product) CFG.product.fields=f;
 }
@@ -340,12 +340,12 @@ const CFG={
       {k:'calc',l:'Tipe',type:'select',opts:['percent','nominal']},
       {k:'value',l:'Nilai (% atau Rp)',type:'num'},
       {k:'scope',l:'Cakupan',type:'select',opts:['all','product']},
-      {k:'product_id',l:'Produk (jika cakupan produk)',type:'fk',fkTable:'products',fkLabel:'name'},
+      {k:'product_ids',l:'Produk (pilih 1 atau lebih, jika cakupan produk)',type:'multiprod'},
       {k:'day_scope',l:'Hari',type:'select',opts:['all','weekday','weekend']},
       {k:'start_date',l:'Mulai',type:'date'},{k:'end_date',l:'Selesai',type:'date'},
       {k:'active',l:'Aktif',type:'bool'}],
     cols:[{k:'name',l:'Nama'},{k:'calc',l:'Tipe'},{k:'value',l:'Nilai',num:true},
-      {k:'scope',l:'Cakupan'},{k:'product',l:'Produk',fk:true},{k:'active',l:'Status',bool:true}]},
+      {k:'scope',l:'Cakupan'},{k:'product_ids',l:'Produk',prodcount:true},{k:'active',l:'Status',bool:true}]},
 };
 async function crud(cfg){
   const c=document.getElementById('content');
@@ -363,6 +363,7 @@ async function crud(cfg){
       let v=r[co.k];
       if(co.avail){ const bad=v===false; return `<td><span class="pill ${bad?'bad':''}">${bad?'Tidak tersedia':'Tersedia'}</span></td>`; }
       if(co.bool){ const off=v===false; return `<td><span class="pill" style="${off?'background:#eee;color:#888':''}">${off?'Nonaktif':'Aktif'}</span></td>`; }
+      if(co.prodcount){ return `<td>${Array.isArray(v)&&v.length?v.length+' produk':(r.product?esc(r.product.name):'—')}</td>`; }
       if(co.fk){ v=(v&&v[co.fkLabel||'name'])||'—'; return `<td>${esc(v)}</td>`; }
       if(co.money) v=rp(v); else if(v==null||v==='') v='—';
       return `<td class="${co.num?'num':''}">${esc(v)}</td>`;
@@ -384,8 +385,11 @@ async function editRow(cfg,id){
   let catOpts=[];
   const catF=cfg.fields.find(f=>f.type==='cat');
   if(catF){ const {data}=await sb.from(cfg.table).select(catF.k); catOpts=[...new Set((data||[]).map(r=>r[catF.k]).filter(Boolean))].sort(); }
+  let prodOpts=[];
+  if(cfg.fields.some(f=>f.type==='multiprod')){ const {data}=await sb.from('products').select('id,name').eq('active',true).order('name'); prodOpts=data||[]; }
   const f=cfg.fields.map(fl=>{
     const v=row[fl.k];
+    if(fl.type==='multiprod'){ const sel=Array.isArray(v)?v:[]; return field(fl.l,`<div id="f_${fl.k}" style="max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">${prodOpts.length?prodOpts.map(o=>`<label style="display:block;padding:3px 0;font-weight:400"><input type="checkbox" value="${o.id}" ${sel.includes(o.id)?'checked':''}> ${esc(o.name)}</label>`).join(''):'<span style="color:var(--muted)">Belum ada produk</span>'}</div>`); }
     if(fl.type==='bool'){ return field(fl.l,`<select id="f_${fl.k}"><option value="true" ${v!==false?'selected':''}>Ya</option><option value="false" ${v===false?'selected':''}>Tidak</option></select>`); }
     if(fl.type==='fk'){ const lab=fl.fkLabel||'name'; return field(fl.l,`<select id="f_${fl.k}"><option value="">—</option>${(fkOpts[fl.k]||[]).map(o=>`<option value="${o.id}" ${v===o.id?'selected':''}>${esc(o[lab])}</option>`).join('')}</select>`); }
     if(fl.type==='select'){ return field(fl.l,`<select id="f_${fl.k}">${fl.opts.map(o=>`<option ${String(v||'')===o?'selected':''} value="${o}">${o||'—'}</option>`).join('')}</select>`); }
@@ -404,6 +408,7 @@ function field(l,inner){ return `<div class="field"><label>${l}</label>${inner}<
 async function saveRow(cfg,id){
   const rec={};
   for(const fl of cfg.fields){
+    if(fl.type==='multiprod'){ const box=document.getElementById('f_'+fl.k); rec[fl.k]=box?[...box.querySelectorAll('input:checked')].map(x=>x.value):[]; continue; }
     let v=document.getElementById('f_'+fl.k).value;
     if(fl.type==='num') v=v===''?null:Number(v);
     else if(fl.type==='bool') v=(v==='true');
@@ -576,7 +581,7 @@ async function runImport(){
 
 /* ---------- Pengaturan ---------- */
 function viewSettings(){
-  const S=SETTINGS, o=S.outlet||{}, cr=S.cash_rounding||{}, q=S.qris_fee||{}, pb=S.pb1||{}, sv=S.service||{}, pt=S.points||{}, ch=S.channels||{};
+  const S=SETTINGS, o=S.outlet||{}, cr=S.cash_rounding||{}, q=S.qris_fee||{}, pb=S.pb1||{}, sv=S.service||{}, pt=S.points||{}, ch=S.channels||{}, dv=S.delivery||{};
   const chToggle=(id,lbl)=>field(lbl,`<select id="s_ch_${id}"><option value="true" ${ch[id]?'selected':''}>Aktif</option><option value="false" ${!ch[id]?'selected':''}>Nonaktif</option></select>`);
   document.getElementById('content').innerHTML=`
     <div class="pagehead"><h2>Pengaturan</h2></div>
@@ -604,12 +609,21 @@ function viewSettings(){
         ${field('Service charge aktif',`<select id="s_sve"><option value="true" ${sv.enabled?'selected':''}>Ya</option><option value="false" ${!sv.enabled?'selected':''}>Tidak</option></select>`)}
         ${field('Service (%)',`<input id="s_svp" type="text" inputmode="decimal" value="${sv.pct||0}">`)}
       </div>
+      <h3 style="margin:18px 0 12px">Delivery / DO</h3>
+      <div class="grid2">
+        ${field('Minimum order DO (Rp, 0 = tanpa minimum)',`<input id="s_dmin" type="text" inputmode="numeric" value="${dv.min_order||0}">`)}
+        ${field('Ongkos kirim (Rp)',`<input id="s_dfee" type="text" inputmode="numeric" value="${dv.fee||0}">`)}
+        ${field('Gratis ongkir mulai (Rp, 0 = tidak pernah)',`<input id="s_dfree" type="text" inputmode="numeric" value="${dv.free_above||0}">`)}
+      </div>
       <h3 style="margin:18px 0 12px">Poin membership</h3>
       <div class="grid2">
-        ${field('Poin per (Rp)',`<input id="s_ppr" type="text" inputmode="numeric" value="${pt.earn_per_rp||1000}">`)}
+        ${field('Poin aktif',`<select id="s_pen"><option value="true" ${pt.enabled!==false?'selected':''}>Ya</option><option value="false" ${pt.enabled===false?'selected':''}>Tidak</option></select>`)}
+        ${field('Poin per (Rp) belanja',`<input id="s_ppr" type="text" inputmode="numeric" value="${pt.earn_per_rp||1000}">`)}
         ${field('Jumlah poin diperoleh',`<input id="s_pep" type="text" inputmode="numeric" value="${pt.earn_points||1}">`)}
         ${field('Nilai tukar 1 poin (Rp)',`<input id="s_prv" type="text" inputmode="numeric" value="${pt.redeem_value||100}">`)}
+        ${field('Minimum poin untuk ditukar',`<input id="s_pmin" type="text" inputmode="numeric" value="${pt.min_redeem||0}">`)}
       </div>
+      ${field('Kebijakan / syarat penggunaan poin (tampil di struk)',`<textarea id="s_ppolicy" rows="3" style="width:100%;resize:vertical;font-family:inherit">${esc(pt.policy||'')}</textarea>`)}
       <div id="s-msg" class="msg"></div>
       <div class="modal-foot" style="justify-content:flex-start"><button class="btn" onclick="saveSettings()">Simpan pengaturan</button></div>
     </div>`;
@@ -622,8 +636,9 @@ async function saveSettings(){
     {key:'qris_fee',value:{enabled:true,pct:Number(g('s_qris'))||0,borne_by:'merchant'}},
     {key:'pb1',value:{enabled:g('s_pb1e')==='true',pct:Number(g('s_pb1p'))||0}},
     {key:'service',value:{enabled:g('s_sve')==='true',pct:Number(g('s_svp'))||0}},
-    {key:'points',value:{enabled:true,earn_per_rp:Number(g('s_ppr'))||1000,earn_points:Number(g('s_pep'))||1,redeem_value:Number(g('s_prv'))||100}},
+    {key:'points',value:{enabled:g('s_pen')==='true',earn_per_rp:Number(g('s_ppr'))||1000,earn_points:Number(g('s_pep'))||1,redeem_value:Number(g('s_prv'))||100,min_redeem:Number(g('s_pmin'))||0,policy:g('s_ppolicy')||''}},
     {key:'channels',value:{takeaway:g('s_ch_takeaway')==='true',delivery:g('s_ch_delivery')==='true',gofood:g('s_ch_gofood')==='true',grabfood:g('s_ch_grabfood')==='true',shopeefood:g('s_ch_shopeefood')==='true'}},
+    {key:'delivery',value:{min_order:Number(g('s_dmin'))||0,fee:Number(g('s_dfee'))||0,free_above:Number(g('s_dfree'))||0}},
   ];
   msg('s-msg','Menyimpan...','');
   const {error}=await sb.from('settings').upsert(rows,{onConflict:'key'});
@@ -649,10 +664,10 @@ function activeChannels(){ const on=(typeof SETTINGS!=='undefined'&&SETTINGS.cha
 const isOnlineType=t=>!!chanById(t).online;
 const posTypeLabel=t=>{const c=CHANNELS.find(x=>x.id===t);return c?c.type:(t==='booking'?'Booking':t);};
 const posPriceField=t=>chanById(t).field;
-// Effective price of product p when sold on channel t (online with no price = not sold; in-store with no price = base "Harga")
-function prodPrice(p,t){ const c=chanById(t); const v=Number(p[c.field]||0); if(c.base)return v; if(v>0)return v; return c.online?0:Number(p.price_dinein||0); }
-// Is product p sold on channel t?
-function prodAvailOn(p,t){ const c=chanById(t); if(c.base)return true; if(c.online)return Number(p[c.field]||0)>0; return true; }
+// Effective price of product p on channel t (online uses its own price if set, else base "Harga")
+function prodPrice(p,t){ const c=chanById(t); const v=Number(p[c.field]||0); if(c.base)return v; if(v>0)return v; return Number(p.price_dinein||0); }
+// Products are sellable on any order type (online uses base price if no special price set)
+function prodAvailOn(p,t){ return true; }
 
 async function viewPOS(){
   await loadShift();
@@ -686,12 +701,22 @@ async function renderPosOpen(){
 function posNewOrder(){
   if(!SHIFT){ alert('Buka shift kasir dulu sebelum membuat pesanan.'); go('shift'); return; }
   openModal(`<h2 style="margin-bottom:14px">Pesanan Baru</h2>
-   ${field('Tipe penjualan',`<select id="po_type">${activeChannels().map(c=>`<option value="${c.id}">${c.type}${c.online?' (online)':''}</option>`).join('')}</select>`)}
+   ${field('Tipe penjualan',`<select id="po_type">${CHANNELS.map(c=>`<option value="${c.id}">${c.type}${c.online?' (online)':''}</option>`).join('')}</select>`)}
    ${field('No meja (kosongkan jika bukan dine in)',`<input id="po_table">`)}
    ${field('Nama customer (opsional)',`<input id="po_cust">`)}
-   ${field('No HP member (opsional)',`<input id="po_member" placeholder="08...">`)}
+   ${field('No HP member (opsional)',`<input id="po_member" placeholder="08..." onchange="posMemberLookup()">`)}
    <div id="po-msg" class="msg"></div>
    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="posCreateOrder()">Buka pesanan</button></div>`);
+}
+async function posMemberLookup(){
+  const phone=document.getElementById('po_member').value.trim();
+  const m=document.getElementById('po-msg');
+  if(!phone){ if(m){m.textContent='';m.className='msg';} return; }
+  const {data}=await sb.from('members').select('name,tier:membership_tiers(name,discount_pct)').eq('phone',phone).maybeSingle();
+  if(data){
+    const cust=document.getElementById('po_cust'); if(cust) cust.value=data.name||cust.value||'';
+    if(m){ m.className='msg ok'; m.textContent='Member: '+(data.name||'-')+(data.tier?(' · '+data.tier.name+(data.tier.discount_pct?(' — diskon '+data.tier.discount_pct+'%'):'')):''); }
+  } else { if(m){ m.className='msg'; m.textContent='Nomor belum terdaftar sebagai member (lanjut tanpa member).'; } }
 }
 async function posCreateOrder(){
   const type=document.getElementById('po_type').value;
@@ -732,6 +757,12 @@ async function posAdd(pid){
     if(error){ alert('Gagal: '+error.message); return; } POS.items.push(data); }
   renderPosOrder();
 }
+async function posToggleTA(id){
+  const i=POS.items.find(x=>x.id===id); if(!i||i.sent)return;
+  i.takeaway=!i.takeaway;
+  await sb.from('order_items').update({takeaway:i.takeaway}).eq('id',id);
+  renderPosOrder();
+}
 async function posQty(id,d){
   const i=POS.items.find(x=>x.id===id); if(!i||i.sent)return;
   const q=Number(i.qty)+d;
@@ -753,7 +784,7 @@ function computeTotals(opts){
     PROMOS.forEach(pr=>{
       if((pr.start_date&&pr.start_date>ds)||(pr.end_date&&pr.end_date<ds))return;
       if(pr.day_scope==='weekend'&&!weekend)return; if(pr.day_scope==='weekday'&&weekend)return;
-      if(pr.scope==='product'&&pr.product_id!==p.id)return;
+      if(pr.scope==='product'){ const ids=(Array.isArray(pr.product_ids)&&pr.product_ids.length)?pr.product_ids:(pr.product_id?[pr.product_id]:[]); if(!ids.includes(p.id))return; }
       const d=pr.calc==='percent'?line*Number(pr.value)/100:Math.min(Number(pr.value),line);
       if(d>best)best=d;
     });
@@ -762,17 +793,24 @@ function computeTotals(opts){
   const S=SETTINGS, sv=S.service||{}, pb=S.pb1||{}, cr=S.cash_rounding||{}, pts=S.points||{};
   const voucher=online?0:Math.min(Number(opts.voucher||0),subtotal);
   const redeemVal=pts.redeem_value||100;
-  const pointsRedeem=online?0:Math.min(Number(opts.pointsRedeem||0),POS.member?Number(POS.member.points||0):0);
+  const canRedeem=(pts.enabled!==false)&&POS.member&&Number(POS.member.points||0)>=Number(pts.min_redeem||0);
+  const pointsRedeem=(online||!canRedeem)?0:Math.min(Number(opts.pointsRedeem||0),POS.member?Number(POS.member.points||0):0);
   const points_value=pointsRedeem*redeemVal;
   const base=Math.max(0,subtotal-dPromo-dMember-voucher-points_value);
   const service=(!online&&sv.enabled)?Math.round(base*Number(sv.pct||0)/100):0;
   const pb1=(!online&&pb.enabled)?Math.round((base+service)*Number(pb.pct||0)/100):0;
-  let pre=base+service+pb1, rounding=0, total=pre;
+  let delivery_fee=0;
+  if(st==='delivery'){
+    const dvs=S.delivery||{};
+    if(opts.delivFee!=null&&opts.delivFee!==''){ delivery_fee=Math.max(0,Number(opts.delivFee)||0); }
+    else { delivery_fee=Number(dvs.fee||0); if(Number(dvs.free_above||0)>0 && base>=Number(dvs.free_above)) delivery_fee=0; }
+  }
+  let pre=base+service+pb1+delivery_fee, rounding=0, total=pre;
   if(!online&&cr.enabled){ const inc=Number(cr.increment||100); total=Math.round(pre/inc)*inc; rounding=total-pre; }
   const points_earned=(!online&&POS.member&&pts.enabled)?Math.floor(total/(pts.earn_per_rp||1000))*(pts.earn_points||1):0;
   return {subtotal:Math.round(subtotal),discount_promo:Math.round(dPromo),discount_member:Math.round(dMember),
     voucher:Math.round(voucher),points_value:Math.round(points_value),pointsRedeem,points_earned,
-    service,pb1,rounding,total:Math.round(total),sales_type:st};
+    service,pb1,delivery_fee:Math.round(delivery_fee),rounding,total:Math.round(total),sales_type:st};
 }
 function renderPosOrder(){
   const el=document.getElementById('pos-order'); if(!el)return;
@@ -785,8 +823,8 @@ function renderPosOrder(){
   const pf=posPriceField(o.sales_type); let rows='';
   POS.items.forEach(i=>{const p=POS.products.find(x=>x.id===i.product_id)||{}; const price=prodPrice(p,o.sales_type);
     rows+=`<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--line)">
-      <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(p.name||i.name)}</div>
-      <div style="font-size:12px;color:var(--muted)">${rp(price)}${i.sent?' · ✓ dapur':''}</div></div>
+      <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(p.name||i.name)}${i.takeaway?' <span class="pill" style="background:#fdf1e3;color:#9a5b1e;font-size:10px">Bungkus</span>':''}</div>
+      <div style="font-size:12px;color:var(--muted)">${rp(price)}${i.sent?' · ✓ dapur':''}${i.sent?'':` · <a href="#" onclick="posToggleTA('${i.id}');return false" style="color:var(--teal)">${i.takeaway?'batal bungkus':'bungkus'}</a>`}</div></div>
       ${i.sent?`<span style="font-size:13px">×${i.qty}</span><button class="btn danger sm" title="Void (otorisasi manager)" onclick="posVoidItem('${i.id}')">✕</button>`:
         `<button class="btn sec sm" onclick="posQty('${i.id}',-1)">−</button><span style="min-width:18px;text-align:center">${i.qty}</span><button class="btn sec sm" onclick="posQty('${i.id}',1)">+</button>`}
       <div style="min-width:72px;text-align:right;font-size:13px">${rp(price*Number(i.qty))}</div></div>`;});
@@ -805,17 +843,18 @@ async function posSendKitchen(){
 }
 function posPay(){
   if(!POS.items.length){ alert('Belum ada item.'); return; }
-  POS.pay={voucher:0,pointsRedeem:0,lines:[{method:'tunai',amount:0}]};
+  POS.pay={voucher:0,pointsRedeem:0,delivFee:null,lines:[{method:'tunai',amount:0}]};
   openModal('<div id="pay-body"></div>'); renderPay();
 }
 function renderPay(){
-  const o=POS.order, online=isOnlineType(o.sales_type);
-  const t=computeTotals({voucher:POS.pay.voucher,pointsRedeem:POS.pay.pointsRedeem});
+  const o=POS.order, online=isOnlineType(o.sales_type), isDO=o.sales_type==='delivery';
+  const t=computeTotals({voucher:POS.pay.voucher,pointsRedeem:POS.pay.pointsRedeem,delivFee:POS.pay.delivFee});
+  const dvs=SETTINGS.delivery||{}; const belowMin=isDO&&Number(dvs.min_order||0)>0&&t.subtotal<Number(dvs.min_order);
   const paid=POS.pay.lines.reduce((s,l)=>s+Number(l.amount||0),0), change=paid-t.total;
   const L=(l,v,b)=>`<div style="display:flex;justify-content:space-between;${b?'font-weight:600;font-size:16px;':'font-size:13px;color:var(--muted);'}margin:3px 0"><span>${l}</span><span>${v}</span></div>`;
   const row=(l,idx)=>`<div style="display:flex;gap:8px;margin-bottom:6px">
     <select onchange="POS.pay.lines[${idx}].method=this.value;renderPay()" style="flex:1">
-      <option value="tunai" ${l.method==='tunai'?'selected':''}>Tunai</option><option value="qris" ${l.method==='qris'?'selected':''}>QRIS</option><option value="transfer" ${l.method==='transfer'?'selected':''}>Transfer</option></select>
+      <option value="tunai" ${l.method==='tunai'?'selected':''}>Tunai</option><option value="qris" ${l.method==='qris'?'selected':''}>QRIS</option><option value="transfer" ${l.method==='transfer'?'selected':''}>Transfer</option><option value="edc" ${l.method==='edc'?'selected':''}>EDC (kartu)</option></select>
     <input type="text" inputmode="numeric" value="${l.amount||''}" placeholder="Jumlah" style="flex:1" onchange="POS.pay.lines[${idx}].amount=Number(this.value)||0;renderPay()">
     ${POS.pay.lines.length>1?`<button class="btn ghost sm" onclick="POS.pay.lines.splice(${idx},1);renderPay()">✕</button>`:''}</div>`;
   document.getElementById('pay-body').innerHTML=`<h2 style="margin-bottom:12px">Pembayaran</h2>
@@ -826,8 +865,11 @@ function renderPay(){
     ${t.points_value?L('Poin ditukar','−'+rp(t.points_value)):''}
     ${t.service?L('Service',rp(t.service)):''}
     ${t.pb1?L('PB1',rp(t.pb1)):''}
+    ${isDO?L('Ongkos kirim',t.delivery_fee?rp(t.delivery_fee):'GRATIS'):''}
     ${t.rounding?L('Pembulatan',(t.rounding<0?'−':'')+rp(Math.abs(t.rounding))):''}
     ${L('TOTAL',rp(t.total),true)}
+    ${belowMin?`<div class="msg err" style="display:block">Minimum order DO ${rp(dvs.min_order)} — subtotal saat ini ${rp(t.subtotal)}. Tambah item dulu.</div>`:''}
+    ${isDO&&!belowMin?`<div class="grid2">${field('Ongkos kirim (Rp, bisa diubah)',`<input type="text" inputmode="numeric" value="${t.delivery_fee}" onchange="POS.pay.delivFee=this.value===''?null:(Number(this.value)||0);renderPay()">`)}</div>`:''}
     <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
     ${online?'<div class="msg">Channel online dicatat tanpa pembayaran tunai/QRIS (settlement via platform). Pencatatan online lengkap menyusul.</div>':`
     <div class="grid2">${field('Voucher (Rp)',`<input type="text" inputmode="numeric" value="${POS.pay.voucher||''}" onchange="POS.pay.voucher=Number(this.value)||0;renderPay()">`)}
@@ -838,20 +880,22 @@ function renderPay(){
     ${L('Dibayar',rp(paid))}${L(change>=0?'Kembali':'Kurang',(change<0?'−':'')+rp(Math.abs(change)))}`}
     <div id="pay-msg" class="msg"></div>
     <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button>
-    <button class="btn" onclick="posConfirmPay()" ${(!online&&paid<t.total)?'disabled':''}>Selesaikan & Bayar</button></div>`;
+    <button class="btn" onclick="posConfirmPay()" ${((!online&&paid<t.total)||belowMin)?'disabled':''}>Selesaikan & Bayar</button></div>`;
 }
 async function posConfirmPay(){
   const o=POS.order, online=isOnlineType(o.sales_type);
-  const t=computeTotals({voucher:POS.pay.voucher,pointsRedeem:POS.pay.pointsRedeem});
+  const t=computeTotals({voucher:POS.pay.voucher,pointsRedeem:POS.pay.pointsRedeem,delivFee:POS.pay.delivFee});
+  const dvs=SETTINGS.delivery||{};
+  if(o.sales_type==='delivery'&&Number(dvs.min_order||0)>0&&t.subtotal<Number(dvs.min_order)){ msg('pay-msg','Minimum order DO '+rp(dvs.min_order)+' belum tercapai.','err'); return; }
   const pf=posPriceField(o.sales_type);
   const items=POS.items.map(i=>{const p=POS.products.find(x=>x.id===i.product_id)||{}; const up=prodPrice(p,POS.order.sales_type);
-    return {product_id:i.product_id,name:p.name||i.name,qty:Number(i.qty),unit_price:up,discount:0,subtotal:up*Number(i.qty)};});
+    return {product_id:i.product_id,name:(p.name||i.name)+(i.takeaway?' (bungkus)':''),qty:Number(i.qty),unit_price:up,discount:0,subtotal:up*Number(i.qty)};});
   const qfPct=(SETTINGS.qris_fee&&SETTINGS.qris_fee.pct)||0;
   const payments=online?[]:POS.pay.lines.filter(l=>l.amount>0).map(l=>({method:l.method,amount:Number(l.amount),qris_fee:l.method==='qris'?Math.round(Number(l.amount)*qfPct/100):0}));
   msg('pay-msg','Memproses...','');
   const {data,error}=await sb.rpc('process_sale',{
     p_order:POS.orderId,p_member:POS.member?POS.member.id:null,p_sales_type:o.sales_type,p_items:items,
-    p_breakdown:{subtotal:t.subtotal,discount_promo:t.discount_promo,discount_member:t.discount_member,voucher:t.voucher,service:t.service,pb1:t.pb1,rounding:t.rounding,total:t.total},
+    p_breakdown:{subtotal:t.subtotal,discount_promo:t.discount_promo,discount_member:t.discount_member,voucher:t.voucher,service:t.service,pb1:t.pb1,delivery_fee:t.delivery_fee||0,rounding:t.rounding,total:t.total},
     p_payments:payments,p_voucher_note:null,p_points_redeemed:t.pointsRedeem,p_points_earned:t.points_earned});
   if(error){ msg('pay-msg','Gagal: '+error.message,'err'); return; }
   closeModal(); posPrintInvoice(data,items,t,payments);
@@ -878,13 +922,14 @@ function posPrintInvoice(res,items,t,payments){
   if(t.points_value)h+=RL('Poin ditukar','-'+rp(t.points_value));
   if(t.service)h+=RL('Service',rp(t.service));
   if(t.pb1)h+=RL('PB1',rp(t.pb1));
+  if(t.delivery_fee)h+=RL('Ongkos kirim',rp(t.delivery_fee));
   if(t.rounding)h+=RL('Pembulatan',(t.rounding<0?'-':'')+rp(Math.abs(t.rounding)));
   h+='<hr><div class="r" style="font-weight:bold"><span>TOTAL</span><span>'+rp(t.total)+'</span></div>';
   const paid=payments.reduce((s,p)=>s+Number(p.amount),0);
   payments.forEach(p=>h+=RL(p.method.toUpperCase(),rp(p.amount)));
   if(paid>t.total)h+=RL('Kembali',rp(paid-t.total));
   if(t.points_earned)h+=RL('Poin didapat','+'+t.points_earned);
-  h+='<div class="b"></div><div class="c">Terima kasih</div>'; emitPrint(h,tInvoice(res,items,t,payments));
+  h+=((SETTINGS.points&&SETTINGS.points.policy)?'<div class="c" style="font-size:10px;margin-top:6px;white-space:pre-wrap">'+esc(SETTINGS.points.policy)+'</div>':'')+'<div class="b"></div><div class="c">Terima kasih</div>'; emitPrint(h,tInvoice(res,items,t,payments));
 }
 function posPrintOrder(){
   const t=computeTotals(); const pf=posPriceField(POS.order.sales_type);
@@ -901,7 +946,7 @@ function posPrintTickets(info,items){
   list.forEach(o=>{ const tk=o.tk, its=o.its;
     let h=`<div class="c"><b>DAPUR ${esc(tk.kitchen.toUpperCase())}</b></div><hr>`+RL('No',tk.ticket_no)+
       RL('Meja/Cust',esc(POS.order.table_no||POS.order.customer_name||'-')+' · '+posTypeLabel(POS.order.sales_type))+'<hr>'+
-      its.map(i=>{const p=POS.products.find(x=>x.id===i.product_id)||{};return `<div style="font-size:15px"><b>${i.qty}×</b> ${esc(p.name)}</div>${i.note?`<div style="font-size:11px">› ${esc(i.note)}</div>`:''}`;}).join('')+'<hr>';
+      its.map(i=>{const p=POS.products.find(x=>x.id===i.product_id)||{};return `<div style="font-size:15px"><b>${i.qty}×</b> ${esc(p.name)}${i.takeaway?' <b>[BUNGKUS]</b>':''}</div>${i.note?`<div style="font-size:11px">› ${esc(i.note)}</div>`:''}`;}).join('')+'<hr>';
     printHTML(h);
   });
 }
@@ -945,13 +990,14 @@ function tInvoice(res,items,t,payments){
   if(t.points_value)s+=tLR('Poin ditukar','-'+rp(t.points_value));
   if(t.service)s+=tLR('Service',rp(t.service));
   if(t.pb1)s+=tLR('PB1',rp(t.pb1));
+  if(t.delivery_fee)s+=tLR('Ongkir',rp(t.delivery_fee));
   if(t.rounding)s+=tLR('Pembulatan',(t.rounding<0?'-':'')+rp(Math.abs(t.rounding)));
   s+=tDiv()+'[L]<b>TOTAL</b>[R]<b>'+rp(t.total)+'</b>\n';
   const paid=(payments||[]).reduce((a,p)=>a+Number(p.amount),0);
   (payments||[]).forEach(p=>s+=tLR(p.method.toUpperCase(),rp(p.amount)));
   if(paid>t.total)s+=tLR('Kembali',rp(paid-t.total));
   if(t.points_earned)s+=tLR('Poin didapat','+'+t.points_earned);
-  return s+tDiv()+tC('Terima kasih');
+  return s+((SETTINGS.points&&SETTINGS.points.policy)?tDiv()+tL(tEsc(SETTINGS.points.policy)):'')+tDiv()+tC('Terima kasih');
 }
 function tOrder(t,items){
   let s=tOutlet()+tDiv()+tC('<b>NOTA PESANAN</b>')+tC('BUKAN NOTA PEMBAYARAN')+tDiv();
@@ -960,7 +1006,7 @@ function tOrder(t,items){
 }
 function tTicket(tk,its){
   let s="[C]<font size='big'><b>DAPUR "+tEsc(tk.kitchen.toUpperCase())+"</b></font>\n"+tDiv()+tLR('No',String(tk.ticket_no))+tL(tEsc((POS.order.table_no||POS.order.customer_name||'-')+' - '+posTypeLabel(POS.order.sales_type)))+tDiv();
-  s+=its.map(i=>{ const p=POS.products.find(x=>x.id===i.product_id)||{}; let l='[L]<b>'+i.qty+'x</b> '+tEsc(p.name)+'\n'; if(i.note)l+=tL('  > '+tEsc(i.note)); return l; }).join('');
+  s+=its.map(i=>{ const p=POS.products.find(x=>x.id===i.product_id)||{}; let l='[L]<b>'+i.qty+'x</b> '+tEsc(p.name)+(i.takeaway?' <b>[BUNGKUS]</b>':'')+'\n'; if(i.note)l+=tL('  > '+tEsc(i.note)); return l; }).join('');
   return s+tDiv();
 }
 let PR_LIST=[];
@@ -1246,7 +1292,7 @@ async function viewBooking(){
    data.map(b=>{const days=Math.ceil((new Date(b.event_date)-today)/86400000); const soon=days>=0&&days<=5&&b.paid<b.total;
      return `<tr><td>${b.event_date}${soon?` <span class="pill warn">H-${days}</span>`:''}</td><td>${esc(b.customer_name)}<div style="font-size:11px;color:var(--muted)">${esc(b.phone||'')}</div></td>
       <td class="num">${b.pax}</td><td class="num">${rp(b.total)}</td><td class="num">${rp(b.paid)}</td><td>${statusPill(b.status)}</td>
-      <td class="num">${b.paid<b.total?`<button class="btn sm" onclick="bkPay('${b.id}',${b.total-b.paid})">Bayar</button> `:''}<button class="btn sec sm" onclick="bkKitchen('${b.id}')">Ke Dapur</button>${isMgr()?` <button class="btn danger sm" onclick="bkVoid('${b.id}')">Void</button>`:''}</td></tr>`;
+      <td class="num"><button class="btn sec sm" onclick="bkDetail('${b.id}')">Detail</button> ${b.paid<b.total?`<button class="btn sm" onclick="bkPay('${b.id}',${b.total-b.paid})">Bayar</button> `:''}<button class="btn sec sm" onclick="bkKitchen('${b.id}')">Ke Dapur</button>${isMgr()?` <button class="btn danger sm" onclick="bkVoid('${b.id}')">Void</button>`:''}</td></tr>`;
    }).join('')+'</tbody></table>';
 }
 function bkNew(){ BKLINES=[{product_id:'',qty:1}]; openModal('<div id="bk-body"></div>'); renderBkModal(); }
@@ -1254,14 +1300,15 @@ function renderBkModal(){
   const total=BKLINES.reduce((s,l)=>{const p=BKPRODS.find(x=>x.id===l.product_id);return s+(p?Number(p.price_dinein):0)*Number(l.qty||0);},0);
   const line=(l,i)=>`<div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
     <select onchange="BKLINES[${i}].product_id=this.value;renderBkModal()" style="flex:1"><option value="">— pilih menu —</option>${BKPRODS.map(p=>`<option value="${p.id}" ${l.product_id===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
-    <input type="text" inputmode="decimal" value="${l.qty||''}" style="width:70px" onchange="BKLINES[${i}].qty=Number(this.value)||0;renderBkModal()">
+    <input type="text" inputmode="decimal" value="${l.qty||''}" style="width:70px" onchange="BKLINES[${i}].qty=qnum(this.value);renderBkModal()">
     ${BKLINES.length>1?`<button class="btn ghost sm" onclick="BKLINES.splice(${i},1);renderBkModal()">✕</button>`:''}</div>`;
   document.getElementById('bk-body').innerHTML=`<h2 style="margin-bottom:12px">Booking Baru</h2>
    <div class="grid2">${field('Nama customer',`<input id="bk_name">`)}${field('No HP',`<input id="bk_phone">`)}
    ${field('Tanggal acara',`<input id="bk_date" type="date">`)}${field('Jumlah orang (pax)',`<input id="bk_pax" type="text" inputmode="numeric" value="1">`)}</div>
+   ${field('Keterangan acara (detail acara, opsional)',`<textarea id="bk_note" rows="2" style="width:100%;resize:vertical;font-family:inherit" placeholder="mis. Ulang tahun, dekor merah, mulai jam 18.00, alergi udang"></textarea>`)}
    <div style="font-size:13px;color:var(--muted);margin:6px 0">Menu dipesan</div>${BKLINES.map(line).join('')}
    <button class="btn ghost sm" onclick="BKLINES.push({product_id:'',qty:1});renderBkModal()">+ Tambah menu</button>
-   <div class="grid2" style="margin-top:10px">${field('DP (Rp)',`<input id="bk_dp" type="text" inputmode="numeric" value="0">`)}${field('Metode DP',`<select id="bk_dpm"><option value="tunai">Tunai</option><option value="qris">QRIS</option><option value="transfer">Transfer</option></select>`)}</div>
+   <div class="grid2" style="margin-top:10px">${field('DP (Rp)',`<input id="bk_dp" type="text" inputmode="numeric" value="0">`)}${field('Metode DP',`<select id="bk_dpm"><option value="tunai">Tunai</option><option value="qris">QRIS</option><option value="transfer">Transfer</option><option value="edc">EDC</option></select>`)}</div>
    <div style="display:flex;justify-content:space-between;font-weight:600;margin-top:8px"><span>Total</span><span>${rp(total)}</span></div>
    <div id="bk-msg" class="msg"></div>
    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="bkSave()">Simpan booking</button></div>`;
@@ -1274,14 +1321,14 @@ async function bkSave(){
   const dp=Number(document.getElementById('bk_dp').value)||0;
   msg('bk-msg','Menyimpan...','');
   const {data,error}=await sb.from('bookings').insert({customer_name:name,phone:document.getElementById('bk_phone').value||null,
-    event_date:date,pax:Number(document.getElementById('bk_pax').value)||1,total,dp,paid:dp,status:'booked'}).select().single();
+    event_date:date,pax:Number(document.getElementById('bk_pax').value)||1,total,dp,paid:dp,status:'booked',note:document.getElementById('bk_note').value.trim()||null}).select().single();
   if(error){ msg('bk-msg','Gagal: '+error.message,'err'); return; }
   if(lines.length) await sb.from('booking_items').insert(lines.map(l=>({booking_id:data.id,product_id:l.product_id,qty:l.qty})));
   if(dp>0) await sb.from('booking_payments').insert({booking_id:data.id,kind:'dp',amount:dp,method:document.getElementById('bk_dpm').value});
   closeModal(); viewBooking();
 }
 function bkPay(id,remain){
-  openModal(`<h2 style="margin-bottom:12px">Pelunasan / Pembayaran</h2>${field('Jumlah (Rp)',`<input id="bp_amt" type="text" inputmode="numeric" value="${Math.round(remain)}">`)}${field('Metode',`<select id="bp_m"><option value="tunai">Tunai</option><option value="qris">QRIS</option><option value="transfer">Transfer</option></select>`)}
+  openModal(`<h2 style="margin-bottom:12px">Pelunasan / Pembayaran</h2>${field('Jumlah (Rp)',`<input id="bp_amt" type="text" inputmode="numeric" value="${Math.round(remain)}">`)}${field('Metode',`<select id="bp_m"><option value="tunai">Tunai</option><option value="qris">QRIS</option><option value="transfer">Transfer</option><option value="edc">EDC</option></select>`)}
    <div id="bp-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="bkPaySave('${id}')">Bayar</button></div>`);
 }
 async function bkPaySave(id){
@@ -1293,6 +1340,94 @@ async function bkPaySave(id){
   closeModal(); viewBooking();
 }
 async function bkVoid(id){ if(!confirm('Void booking ini?'))return; const {error}=await sb.from('bookings').update({status:'void'}).eq('id',id); if(error){alert(error.message);return;} viewBooking(); }
+/* ---- Detail booking: lihat/edit menu, keterangan, pembayaran, cetak ---- */
+let BKDET=null;
+async function bkDetail(id){
+  const {data:b}=await sb.from('bookings').select('*').eq('id',id).single();
+  const {data:items}=await sb.from('booking_items').select('id,product_id,qty, product:products(name,price_dinein)').eq('booking_id',id).order('id');
+  const {data:pays}=await sb.from('booking_payments').select('*').eq('booking_id',id).order('created_at');
+  BKDET={b,items:items||[],pays:pays||[]};
+  openModal('<div id="bkd-body"></div>'); renderBkDetail();
+}
+function renderBkDetail(){
+  const {b,items,pays}=BKDET;
+  const total=Number(b.total||0), paid=Number(b.paid||0), remain=Math.max(0,total-paid);
+  const rows=items.length?items.map(i=>{const nm=i.product?i.product.name:'(produk terhapus)', pr=Number(i.product?i.product.price_dinein:0);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px">
+      <div style="flex:1">${esc(nm)}<div style="font-size:11px;color:var(--muted)">${i.qty} × ${rp(pr)}</div></div>
+      <div style="min-width:80px;text-align:right">${rp(pr*Number(i.qty))}</div>
+      <button class="btn ghost sm" title="Hapus menu" onclick="bkdDel('${i.id}')">✕</button></div>`;}).join('')
+    :'<div class="empty">Belum ada menu.</div>';
+  const payRows=pays.length?pays.map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);padding:2px 0"><span>${p.kind==='dp'?'DP':'Pelunasan'} · ${esc(p.method)} · ${String(p.created_at||'').slice(0,10)}</span><span>${rp(p.amount)}</span></div>`).join(''):'<div style="font-size:12px;color:var(--muted)">Belum ada pembayaran.</div>';
+  document.getElementById('bkd-body').innerHTML=`<h2 style="margin-bottom:10px">Detail Booking</h2>
+   <div style="font-size:13px;line-height:1.7;margin-bottom:8px"><b>${esc(b.customer_name)}</b>${b.phone?' · '+esc(b.phone):''}<br>
+   Tgl acara: <b>${b.event_date}</b> · ${b.pax} pax · ${statusPill(b.status)}</div>
+   ${b.note?`<div style="background:#f6f4ee;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px;white-space:pre-wrap"><b>Keterangan:</b> ${esc(b.note)}</div>`:''}
+   <div style="font-size:13px;color:var(--muted);margin:8px 0 4px">Menu dipesan</div>${rows}
+   <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+     <select id="bkd_prod" style="flex:1;min-width:150px"><option value="">— tambah menu —</option>${BKPRODS.map(p=>`<option value="${p.id}">${esc(p.name)} · ${rp(p.price_dinein)}</option>`).join('')}</select>
+     <input id="bkd_qty" type="text" inputmode="decimal" value="1" style="width:64px">
+     <button class="btn sec sm" onclick="bkdAdd()">Tambah</button></div>
+   <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px">
+     <div style="display:flex;justify-content:space-between;font-weight:600"><span>Total</span><span>${rp(total)}</span></div>
+     ${payRows}
+     <div style="display:flex;justify-content:space-between;font-size:13px"><span>Terbayar</span><span>${rp(paid)}</span></div>
+     <div style="display:flex;justify-content:space-between;font-weight:600;color:${remain>0?'var(--danger)':'var(--ok)'}"><span>${remain>0?'Sisa':'LUNAS'}</span><span>${remain>0?rp(remain):''}</span></div></div>
+   <div id="bkd-msg" class="msg"></div>
+   <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Tutup</button>
+     ${remain>0?`<button class="btn sec" onclick="closeModal();bkPay('${b.id}',${remain})">Bayar</button>`:''}
+     <button class="btn" onclick="bkPrintNow()">Cetak struk</button></div>`;
+}
+async function bkdRecalc(){
+  const {b,items}=BKDET;
+  const total=items.reduce((s,i)=>s+Number(i.product?i.product.price_dinein:0)*Number(i.qty),0);
+  const paid=Number(b.paid||0);
+  const status=b.status==='void'?'void':(total>0&&paid>=total?'settled':'booked');
+  await sb.from('bookings').update({total,status}).eq('id',b.id);
+  b.total=total; b.status=status;
+}
+async function bkdAdd(){
+  const pid=document.getElementById('bkd_prod').value, qty=qnum(document.getElementById('bkd_qty').value);
+  if(!pid||!(qty>0)){ msg('bkd-msg','Pilih menu & isi qty.','err'); return; }
+  const {data,error}=await sb.from('booking_items').insert({booking_id:BKDET.b.id,product_id:pid,qty}).select('id,product_id,qty').single();
+  if(error){ msg('bkd-msg','Gagal: '+error.message,'err'); return; }
+  const p=BKPRODS.find(x=>x.id===pid);
+  BKDET.items.push({id:data.id,product_id:pid,qty,product:{name:p?p.name:'',price_dinein:p?p.price_dinein:0}});
+  await bkdRecalc(); renderBkDetail();
+}
+async function bkdDel(itemId){
+  const {error}=await sb.from('booking_items').delete().eq('id',itemId);
+  if(error){ msg('bkd-msg','Gagal: '+error.message,'err'); return; }
+  BKDET.items=BKDET.items.filter(i=>i.id!==itemId);
+  await bkdRecalc(); renderBkDetail();
+}
+function bkPrintNow(){
+  const {b,items,pays}=BKDET;
+  const total=Number(b.total||0), paid=Number(b.paid||0), remain=Math.max(0,total-paid);
+  let h=outletHTML()+'<hr><div class="c"><b>BUKTI BOOKING</b></div><hr>'
+    +RL('Customer',esc(b.customer_name))+(b.phone?RL('HP',esc(b.phone)):'')
+    +RL('Tgl acara',b.event_date)+RL('Pax',String(b.pax))
+    +(b.note?'<div style="font-size:11px;white-space:pre-wrap">Ket: '+esc(b.note)+'</div>':'')
+    +'<div class="b"></div>'
+    +items.map(i=>{const nm=i.product?i.product.name:'-',pr=Number(i.product?i.product.price_dinein:0);
+      return `<div>${esc(nm)}</div><div class="r"><span>${i.qty} × ${rp(pr)}</span><span>${rp(pr*Number(i.qty))}</span></div>`;}).join('')
+    +'<div class="b"></div>'+RL('<b>TOTAL</b>','<b>'+rp(total)+'</b>')
+    +pays.map(p=>RL((p.kind==='dp'?'DP':'Pelunasan')+' ('+esc(p.method)+')',rp(p.amount))).join('')
+    +RL('Terbayar',rp(paid))+(remain>0?RL('<b>SISA</b>','<b>'+rp(remain)+'</b>'):'<div class="c"><b>LUNAS</b></div>')
+    +'<div class="b"></div><div class="c">Terima kasih</div>';
+  let t=tOutlet()+tDiv()+tC('<b>BUKTI BOOKING</b>')+tDiv()
+    +tLR('Customer',tEsc(b.customer_name))+(b.phone?tLR('HP',tEsc(b.phone)):'')
+    +tLR('Tgl acara',String(b.event_date))+tLR('Pax',String(b.pax))
+    +(b.note?tL('Ket: '+tEsc(b.note)):'')+tDiv()
+    +items.map(i=>{const nm=i.product?i.product.name:'-',pr=Number(i.product?i.product.price_dinein:0);
+      return tL(tEsc(nm))+'[L]  '+i.qty+' x '+rp(pr)+'[R]'+rp(pr*Number(i.qty))+'\n';}).join('')
+    +tDiv()+'[L]<b>TOTAL</b>[R]<b>'+rp(total)+'</b>\n'
+    +pays.map(p=>tLR((p.kind==='dp'?'DP':'Pelunasan')+' ('+tEsc(p.method)+')',rp(p.amount))).join('')
+    +tLR('Terbayar',rp(paid))
+    +(remain>0?'[L]<b>SISA</b>[R]<b>'+rp(remain)+'</b>\n':tC('<b>LUNAS</b>'))
+    +tDiv()+tC('Terima kasih');
+  emitPrint(h,t);
+}
 async function bkKitchen(id){
   if(!confirm('Kirim pesanan booking ini ke dapur?'))return;
   const {data:b}=await sb.from('bookings').select('customer_name').eq('id',id).single();
