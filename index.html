@@ -102,7 +102,8 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
   .pos-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:16px;align-items:start}
   .pos-left{min-width:0}
   .pos-right{min-width:0;position:sticky;top:72px;align-self:start}
-  @media(max-width:768px){
+  @media(max-width:900px){
+    html,body{overflow-x:hidden}
     .shell{grid-template-columns:1fr}
     .side{position:fixed;left:0;top:0;bottom:0;width:240px;transform:translateX(-100%);transition:transform .22s;z-index:40}
     .side.open{transform:none}
@@ -112,8 +113,18 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
     .content{padding:14px;padding-left:calc(14px + env(safe-area-inset-left));padding-right:calc(14px + env(safe-area-inset-right));padding-bottom:calc(14px + env(safe-area-inset-bottom))}
     .pos-layout{grid-template-columns:1fr}
     .pos-right{position:static}
-    .panel{overflow-x:auto}
-    table{white-space:nowrap}
+    .panel{overflow-x:visible}
+    td{word-break:break-word}
+    /* Tabel menjadi kartu bertumpuk: tanpa scroll samping */
+    table.rsp,table.rsp tbody,table.rsp tr{display:block;width:100%}
+    table.rsp thead{display:none}
+    table.rsp tr{padding:9px 12px;border-bottom:6px solid var(--bg)}
+    table.rsp tr:last-child{border-bottom:none}
+    table.rsp td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:none;padding:3px 0;white-space:normal;text-align:right}
+    table.rsp td::before{content:attr(data-l);color:var(--muted);font-size:12px;flex:0 0 auto;text-align:left}
+    table.rsp td:first-child{font-weight:600}
+    table.rsp td[data-l=""]{justify-content:flex-end;flex-wrap:wrap;gap:6px}
+    table.rsp td[data-l=""]::before{content:none}
     .cards{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
   }
   #rotate-lock{display:none;position:fixed;inset:0;z-index:99999;background:var(--teal);color:#fff;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:28px}
@@ -145,6 +156,7 @@ if(!window.XLSX){document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xl
     <button class="btn" style="width:100%" onclick="doLogin()">Masuk</button>
     <div id="lg-msg" class="msg"></div>
     <button class="btn ghost sm" style="width:100%;margin-top:14px" onclick="resetConfig()">Ganti koneksi Supabase</button>
+    <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:10px">Versi <span class="appver"></span></div>
   </div>
 </div>
 
@@ -175,6 +187,17 @@ const LS_URL='kit_sb_url', LS_KEY='kit_sb_key';
 const DEFAULT_URL='https://ehorzoooqinfcmgyitju.supabase.co';
 const DEFAULT_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVob3J6b29vcWluZmNtZ3lpdGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjk0MjUsImV4cCI6MjA5ODIwNTQyNX0.Y8ME7LPHgoTayA1CwnC9Q3oXHHNE9G_s_lVHdNkxFPI';
 let sb=null, ME={username:'',role:'',id:''}, SETTINGS={}, POLL=null, SHIFT=null;
+const APP_VER='2026-07-06.2';
+document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VER);});
+/* Tabel responsif otomatis: tiap tabel diberi label kolom agar jadi kartu di layar kecil */
+function rspTables(){
+  document.querySelectorAll('table').forEach(t=>{
+    t.classList.add('rsp');
+    const ths=[...t.querySelectorAll('thead th')].map(x=>x.textContent.trim());
+    t.querySelectorAll('tbody tr').forEach(tr=>[...tr.children].forEach((td,i)=>{ if(!td.hasAttribute('data-l')) td.setAttribute('data-l',ths[i]||''); }));
+  });
+}
+document.addEventListener('DOMContentLoaded',()=>{ rspTables(); new MutationObserver(rspTables).observe(document.body,{childList:true,subtree:true}); });
 
 /* ---------- Boot ---------- */
 function show(id){['screen-config','screen-login','app'].forEach(s=>document.getElementById(s).style.display='none');
@@ -1100,6 +1123,7 @@ function viewPrinter(){
       <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Struk keluar lewat jendela cetak browser — ke printer biasa, printer thermal USB di komputer, atau simpan PDF. Ukuran sudah diatur untuk kertas 58mm.</div>`}`}
       <div id="pr-list"></div>
       <div id="pr-msg" class="msg"></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:12px">Versi aplikasi: ${APP_VER}</div>
     </div>`;
 }
 function prPerm(){
