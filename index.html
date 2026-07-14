@@ -1003,6 +1003,10 @@ function renderPay(){
     <button class="btn" onclick="posConfirmPay()" ${(!online&&paid<t.total)?'disabled':''}>Selesaikan & Bayar</button></div>`;
 }
 async function posConfirmPay(){
+    if(!SHIFT || !SHIFT.id){
+    msg('pay-msg','Sesi shift tidak valid atau belum dibuka. Harap refresh halaman dan buka shift.','err');
+    return;
+  }
   const o=POS.order, online=isOnlineType(o.sales_type);
   const t=computeTotals({voucher:POS.pay.voucher,pointsRedeem:POS.pay.pointsRedeem,delivFee:POS.pay.delivFee});
   const pf=posPriceField(o.sales_type);
