@@ -770,12 +770,50 @@ async function viewPOS(){
 }
 async function renderPosOpen(){
   const {data}=await sb.from('orders').select('id,table_no,customer_name,sales_type,created_at').eq('status','open').order('created_at');
+  
+  // Cek shift global (siapapun yang membuka, bukan hanya ME.id)
+  const { data: gShift } = await sb.from('shifts')
+    .select('cashier:app_users(username), opened_at')
+    .eq('status','open')
+    .maybeSingle();
+  
   let h='';
-  if(SHIFT) h+=`<div style="font-size:13px;color:var(--muted);margin-bottom:8px">Shift terbuka · modal ${rp(SHIFT.opening_float)} · <a href="#" onclick="go('shift');return false" style="color:var(--teal)">kelola</a></div>`;
-  else h+=`<div style="background:#fcefe2;color:#9a5b1e;padding:8px 12px;border-radius:8px;margin-bottom:10px">Belum buka shift — <a href="#" onclick="go('shift');return false" style="color:#9a5b1e;font-weight:600">Buka Shift</a> dulu sebelum transaksi.</div>`;
-  h+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px"><button class="btn" onclick="posNewOrder()">+ Pesanan Baru</button>`;
-  (data||[]).forEach(o=>{const lbl=o.table_no?('Meja '+o.table_no):(o.customer_name||'Tanpa nama');
-    h+=`<button class="btn ${POS.orderId===o.id?'':'sec'} sm" onclick="posSelectOrder('${o.id}')">${esc(lbl)} · ${posTypeLabel(o.sales_type)}</button>`;});
+  
+  if(SHIFT){
+    // Shift dibuka oleh saya
+    h+=`<div style="font-size:13px;color:var(--muted);margin-bottom:8px">
+      Shift terbuka · modal ${rp(SHIFT.opening_float)} · 
+      <a href="#" onclick="go('shift');return false" style="color:var(--teal)">kelola</a>
+    </div>`;
+  }
+  else if(gShift && gShift.cashier){
+    // Shift dibuka oleh orang lain
+    const cashierName = gShift.cashier.username || 'kasir lain';
+    const openTime = new Date(gShift.opened_at).toLocaleString('id-ID');
+    h+=`<div style="background:#fcefe2;color:#9a5b1e;padding:8px 12px;border-radius:8px;margin-bottom:10px">
+      Kasir sedang dipakai oleh <b>${esc(cashierName)}</b> sejak ${openTime}. 
+      Silakan hubungi yang bersangkutan untuk menutup shift.
+    </div>`;
+  }
+  else {
+    // Belum ada shift yang terbuka
+    h+=`<div style="background:#fcefe2;color:#9a5b1e;padding:8px 12px;border-radius:8px;margin-bottom:10px">
+      Belum buka shift — 
+      <a href="#" onclick="go('shift');return false" style="color:#9a5b1e;font-weight:600">Buka Shift</a> 
+      dulu sebelum transaksi.
+    </div>`;
+  }
+  
+  h+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+    <button class="btn" onclick="posNewOrder()">+ Pesanan Baru</button>`;
+  
+  (data||[]).forEach(o=>{
+    const lbl=o.table_no?('Meja '+o.table_no):(o.customer_name||'Tanpa nama');
+    h+=`<button class="btn ${POS.orderId===o.id?'':'sec'} sm" onclick="posSelectOrder('${o.id}')">
+      ${esc(lbl)} · ${posTypeLabel(o.sales_type)}
+    </button>`;
+  });
+  
   document.getElementById('pos-open').innerHTML=h+'</div>';
 }
 function posNewOrder(){
@@ -1838,9 +1876,16 @@ async function doBackup(){
 /* ==================== SHIFT KASIR ==================== */
 let SHIFTHIST=[];
 async function loadShift(){
-  if(!sb||!['owner','manager','kasir'].includes(ME.role)){ SHIFT=null; return; }
-  const {data}=await sb.from('shifts').select('*').eq('cashier_id',ME.id).eq('status','open').order('opened_at',{ascending:false}).maybeSingle();
-  SHIFT=data||null;
+    if(!sb||!['owner','manager','kasir'].includes(ME.role)){ SHIFT=null; return; }
+    
+    // Cari shift yang masih open (siapapun yang buka)
+    const {data}=await sb.from('shifts')
+        .select('*')
+        .eq('status','open')
+        .order('opened_at',{ascending:false})
+        .maybeSingle();
+    
+    SHIFT=data||null;
 }
 async function shiftCashSales(shiftId){
   const {data:ords}=await sb.from('orders').select('id').eq('shift_id',shiftId);
@@ -1851,41 +1896,100 @@ async function shiftCashSales(shiftId){
   return (pays||[]).reduce((s,p)=>s+Number(p.amount),0);
 }
 async function viewShift(){
-  await loadShift();
-  const c=document.getElementById('content');
-  const FR=(l,v,b)=>`<div style="display:flex;justify-content:space-between;margin:4px 0;${b?'font-weight:600':''}"><span>${l}</span><span>${v}</span></div>`;
-  let h=`<div class="pagehead"><h2>Shift Kasir</h2></div>`;
-  if(SHIFT){
-    const cash=await shiftCashSales(SHIFT.id); const exp=Number(SHIFT.opening_float)+cash;
-    h+=`<div class="panel" style="padding:20px;max-width:520px">
-      ${FR('Status','<b>Terbuka</b>')}${FR('Dibuka',new Date(SHIFT.opened_at).toLocaleString('id-ID'))}
-      ${FR('Modal awal',rp(SHIFT.opening_float))}${FR('Penjualan tunai',rp(cash))}${FR('Perkiraan kas',rp(exp),true)}
-      <button class="btn" style="width:100%;margin-top:12px" onclick="closeShiftPrompt()">Tutup Shift</button></div>`;
+  // 1. Cek shift global (siapapun yang membuka, bukan hanya ME.id)
+  const {data:globalOpenShift} = await sb.from('shifts')
+    .select('*, cashier:app_users(username)')
+    .eq('status', 'open')
+    .maybeSingle();
+  
+  // Sinkronkan dengan variabel global SHIFT agar kompatibel dengan fungsi lain
+  SHIFT = globalOpenShift || null;
+
+  const c = document.getElementById('content');
+  const FR = (l,v,b) => `<div style="display:flex;justify-content:space-between;margin:4px 0;${b?'font-weight:600':''}"><span>${l}</span><span>${v}</span></div>`;
+  let h = `<div class="pagehead"><h2>Shift Kasir</h2></div>`;
+  
+  if(globalOpenShift){
+    const isMyShift = globalOpenShift.cashier_id === ME.id;
+    const cashierName = globalOpenShift.cashier ? globalOpenShift.cashier.username : 'Kasir lain';
+    const cash = await shiftCashSales(globalOpenShift.id); 
+    const exp = Number(globalOpenShift.opening_float) + cash;
+    
+    h += `<div class="panel" style="padding:20px;max-width:520px; ${!isMyShift ? 'border-left: 4px solid var(--warn);' : ''}">
+      ${FR('Status', '<b>Terbuka</b>')}
+      ${FR('Dibuka oleh', cashierName)}
+      ${FR('Dibuka pada', new Date(globalOpenShift.opened_at).toLocaleString('id-ID'))}
+      ${FR('Modal awal', rp(globalOpenShift.opening_float))}
+      ${FR('Penjualan tunai', rp(cash))}
+      ${FR('Perkiraan kas', rp(exp), true)}
+      ${isMyShift 
+        ? `<button class="btn" style="width:100%;margin-top:12px" onclick="closeShiftPrompt()">Tutup Shift</button>` 
+        : `<div style="margin-top:12px;padding:12px;background:#fcefe2;border-radius:8px;color:var(--warn);font-size:13px">
+             ⚠️ Shift ini dibuka oleh <b>${esc(cashierName)}</b>. Hanya kasir yang membuka atau Manager/Owner yang dapat menutup shift ini.
+           </div>`
+      }
+    </div>`;
   } else {
-    h+=`<div class="panel" style="padding:20px;max-width:520px"><p style="margin-top:0;color:var(--muted)">Belum ada shift terbuka. Buka shift sebelum mulai transaksi.</p><button class="btn" onclick="openShiftPrompt()">Buka Shift</button></div>`;
+    h += `<div class="panel" style="padding:20px;max-width:520px"><p style="margin-top:0;color:var(--muted)">Belum ada shift terbuka. Buka shift sebelum mulai transaksi.</p><button class="btn" onclick="openShiftPrompt()">Buka Shift</button></div>`;
   }
-  h+=`<div class="pagehead" style="margin-top:18px"><h3>Riwayat Shift</h3></div><div class="panel" id="sh-hist"><div class="empty">Memuat...</div></div>`;
-  c.innerHTML=h;
-  const {data:hist}=await sb.from('shifts').select('*, cashier:app_users(username)').order('opened_at',{ascending:false}).limit(20);
-  SHIFTHIST=hist||[];
-  document.getElementById('sh-hist').innerHTML=(!SHIFTHIST.length)?'<div class="empty">Belum ada shift.</div>':
-   `<table><thead><tr><th>Dibuka</th><th>Kasir</th><th class="num">Modal</th><th class="num">Fisik</th><th class="num">Selisih</th><th>Status</th><th></th></tr></thead><tbody>`+
-   SHIFTHIST.map((s,i)=>`<tr><td>${new Date(s.opened_at).toLocaleString('id-ID')}</td><td>${esc(s.cashier?s.cashier.username:'-')}</td><td class="num">${rp(s.opening_float)}</td><td class="num">${s.closing_count!=null?rp(s.closing_count):'-'}</td><td class="num">${s.variance!=null?rp(s.variance):'-'}</td><td>${statusPill(s.status)}</td>
-     <td class="num">${s.status==='closed'?`<button class="btn sec sm" onclick="waShift(${i})">WA</button>`:''}</td></tr>`).join('')+'</tbody></table>';
+  
+  h += `<div class="pagehead" style="margin-top:18px"><h3>Riwayat Shift</h3></div><div class="panel" id="sh-hist"><div class="empty">Memuat...</div></div>`;
+  c.innerHTML = h;
+  
+  const {data:hist} = await sb.from('shifts').select('*, cashier:app_users(username)').order('opened_at',{ascending:false}).limit(20);
+  SHIFTHIST = hist || [];
+  
+  document.getElementById('sh-hist').innerHTML = (!SHIFTHIST.length) ? '<div class="empty">Belum ada shift.</div>' :
+  `<table><thead><tr><th>Dibuka</th><th>Kasir</th><th class="num">Modal</th><th class="num">Fisik</th><th class="num">Selisih</th><th>Status</th><th></th></tr></thead><tbody>` +
+  SHIFTHIST.map((s,i) => `<tr><td>${new Date(s.opened_at).toLocaleString('id-ID')}</td><td>${esc(s.cashier ? s.cashier.username : '-')}</td><td class="num">${rp(s.opening_float)}</td><td class="num">${s.closing_count!=null ? rp(s.closing_count) : '-'}</td><td class="num">${s.variance!=null ? rp(s.variance) : '-'}</td><td>${statusPill(s.status)}</td>
+  <td class="num">${s.status==='closed' ? `<button class="btn sec sm" onclick="waShift(${i})">WA</button>` : ''}</td></tr>`).join('') + '</tbody></table>';
 }
 function openShiftPrompt(){ openModal(`<h2 style="margin-bottom:12px">Buka Shift</h2>${field('Modal awal / uang laci (Rp)',`<input id="sf_open" type="text" inputmode="numeric" value="0">`)}<div id="sf-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="openShiftSave()">Buka Shift</button></div>`); }
 async function openShiftSave(){
-  const fl=Number(document.getElementById('sf_open').value)||0;
-  const {data,error}=await sb.from('shifts').insert({cashier_id:ME.id,opening_float:fl,status:'open'}).select().single();
-  if(error){ msg('sf-msg','Gagal: '+error.message,'err'); return; }
-  SHIFT=data; closeModal(); viewShift();
+    // --- TAMBAHAN: CEK APAKAH ADA SHIFT LAIN YANG MASIH OPEN ---
+    const { data: existingShift } = await sb.from('shifts')
+        .select('id, cashier_id, opened_at')
+        .eq('status', 'open')
+        .maybeSingle();
+
+    if (existingShift) {
+        // Ambil nama kasir yang terlanjur membuka
+        const { data: cashierData } = await sb.from('app_users').select('username').eq('id', existingShift.cashier_id).maybeSingle();
+        const cashierName = cashierData ? cashierData.username : 'kasir lain';
+        const openTime = new Date(existingShift.opened_at).toLocaleString('id-ID');
+        
+        // Tolak permintaan dan tampilkan pesan error
+        msg('sf-msg', `Kasir sudah dibuka oleh ${cashierName} pada ${openTime}. Silakan minta mereka menutup shift terlebih dahulu.`, 'err');
+        return; 
+    }
+    // ----------------------------------------------------------
+
+    // Jika aman, lanjutkan proses buka shift seperti biasa
+    const fl=Number(document.getElementById('sf_open').value)||0;
+    const {data,error}=await sb.from('shifts').insert({cashier_id:ME.id,opening_float:fl,status:'open'}).select().single();
+    if(error){ msg('sf-msg','Gagal: '+error.message,'err'); return; }
+    SHIFT=data; closeModal(); viewShift();
 }
 function closeShiftPrompt(){ openModal(`<h2 style="margin-bottom:12px">Tutup Shift</h2><p style="margin-top:0;color:var(--muted);font-size:13px">Hitung semua uang tunai di laci, lalu masukkan jumlahnya. Sistem membandingkan dengan modal + penjualan tunai.</p>${field('Uang fisik dihitung (Rp)',`<input id="sf_close" type="text" inputmode="numeric">`)}<div id="sf-msg" class="msg"></div><div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="closeShiftSave()">Tutup Shift</button></div>`); }
 async function closeShiftSave(){
-  if(document.getElementById('sf_close').value===''){ msg('sf-msg','Isi jumlah uang fisik.','err'); return; }
+  // Validasi: hanya kasir yang buka shift atau manager/owner yang bisa tutup
+  if(SHIFT.cashier_id !== ME.id && ME.role !== 'manager' && ME.role !== 'owner'){
+    msg('sf-msg','Anda tidak bisa menutup shift yang dibuka oleh kasir lain.','err');
+    return;
+  }
+  
+  if(document.getElementById('sf_close').value===''){ 
+    msg('sf-msg','Isi jumlah uang fisik.','err'); 
+    return; 
+  }
+  
   const cnt=Number(document.getElementById('sf_close').value);
   const {data,error}=await sb.rpc('close_shift',{p_shift:SHIFT.id,p_count:cnt});
-  if(error){ msg('sf-msg','Gagal: '+error.message,'err'); return; }
+  if(error){ 
+    msg('sf-msg','Gagal: '+error.message,'err'); 
+    return; 
+  }
+  
   const sh={...SHIFT,closed_at:new Date().toISOString(),expected:data.expected,closing_count:cnt,variance:data.variance,cashier:{username:ME.username}};
   SHIFT=null;
   const a=await shiftAgg(sh.id,sh.opened_at,sh.closed_at);
