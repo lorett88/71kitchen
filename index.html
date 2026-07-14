@@ -973,11 +973,19 @@ function renderPay(){
   const t=computeTotals({voucher:POS.pay.voucher,pointsRedeem:POS.pay.pointsRedeem,delivFee:POS.pay.delivFee});
   const paid=POS.pay.lines.reduce((s,l)=>s+Number(l.amount||0),0), change=paid-t.total;
   const L=(l,v,b)=>`<div style="display:flex;justify-content:space-between;${b?'font-weight:600;font-size:16px;':'font-size:13px;color:var(--muted);'}margin:3px 0"><span>${l}</span><span>${v}</span></div>`;
-  const row=(l,idx)=>`<div style="display:flex;gap:8px;margin-bottom:6px">
-    <select onchange="POS.pay.lines[${idx}].method=this.value;renderPay()" style="flex:1">
-      <option value="tunai" ${l.method==='tunai'?'selected':''}>Tunai</option><option value="qris" ${l.method==='qris'?'selected':''}>QRIS</option><option value="transfer" ${l.method==='transfer'?'selected':''}>Transfer</option><option value="edc" ${l.method==='edc'?'selected':''}>EDC (kartu)</option></select>
-    <input type="text" inputmode="numeric" value="${l.amount||''}" placeholder="Jumlah" style="flex:1" onchange="POS.pay.lines[${idx}].amount=Number(this.value)||0;renderPay()">
-    ${POS.pay.lines.length>1?`<button class="btn ghost sm" onclick="POS.pay.lines.splice(${idx},1);renderPay()">✕</button>`:''}</div>`;
+  const row=(l,idx)=>{
+    const isEDC = l.method === 'edc';
+    return `<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+      <select onchange="POS.pay.lines[${idx}].method=this.value;renderPay()" style="flex:1;min-width:120px">
+        <option value="tunai" ${l.method==='tunai'?'selected':''}>Tunai</option>
+        <option value="qris" ${l.method==='qris'?'selected':''}>QRIS</option>
+        <option value="transfer" ${l.method==='transfer'?'selected':''}>Transfer</option>
+        <option value="edc" ${l.method==='edc'?'selected':''}>EDC (kartu)</option>
+      </select>
+      <input type="text" inputmode="numeric" value="${l.amount||''}" placeholder="Jumlah" style="flex:1;min-width:100px" onchange="POS.pay.lines[${idx}].amount=Number(this.value)||0;renderPay()">
+      ${isEDC ? `<input type="text" id="edc_ref_${idx}" placeholder="No. Ref EDC" value="${l.ref||''}" style="flex:1;min-width:120px" onchange="POS.pay.lines[${idx}].ref=this.value">` : ''}
+      ${POS.pay.lines.length>1 ? `<button class="btn ghost sm" onclick="POS.pay.lines.splice(${idx},1);renderPay()">✕</button>` : ''}
+    </div>`;
   document.getElementById('pay-body').innerHTML=`<h2 style="margin-bottom:12px">Pembayaran</h2>
     ${L('Subtotal',rp(t.subtotal))}
     ${t.discount_promo?L('Diskon Promo','−'+rp(t.discount_promo)):''}
@@ -1003,27 +1011,92 @@ function renderPay(){
     <button class="btn" onclick="posConfirmPay()" ${(!online&&paid<t.total)?'disabled':''}>Selesaikan & Bayar</button></div>`;
 }
 async function posConfirmPay(){
-    if(!SHIFT || !SHIFT.id){
+  // Validasi: Pastikan shift masih valid
+  if(!SHIFT || !SHIFT.id){
     msg('pay-msg','Sesi shift tidak valid atau belum dibuka. Harap refresh halaman dan buka shift.','err');
     return;
   }
+  
   const o=POS.order, online=isOnlineType(o.sales_type);
   const t=computeTotals({voucher:POS.pay.voucher,pointsRedeem:POS.pay.pointsRedeem,delivFee:POS.pay.delivFee});
-  const pf=posPriceField(o.sales_type);
   const items=POS.items.map(i=>{const p=POS.products.find(x=>x.id===i.product_id)||{}; const up=prodPrice(p,POS.order.sales_type);
     return {product_id:i.product_id,name:(p.name||i.name)+(i.takeaway?' (bungkus)':''),qty:Number(i.qty),unit_price:up,discount:0,subtotal:up*Number(i.qty)};});
-  const qfPct=(SETTINGS.qris_fee&&SETTINGS.qris_fee.pct)||0;
-  const payments=online?[]:POS.pay.lines.filter(l=>l.amount>0).map(l=>({method:l.method,amount:Number(l.amount),qris_fee:l.method==='qris'?Math.round(Number(l.amount)*qfPct/100):0}));
+  
+  // Validasi EDC reference
+  const edcLines = POS.pay.lines.filter(l => l.method === 'edc' && l.amount > 0);
+  for (const line of edcLines) {
+    const refInput = document.querySelector(`#edc_ref_${POS.pay.lines.indexOf(line)}`);
+    if (!refInput || !refInput.value.trim()) {
+      msg('pay-msg', 'Masukkan nomor referensi transaksi EDC.', 'err');
+      return;
+    }
+    line.ref = refInput.value.trim();
+  }
+  
+  const qfPct = (SETTINGS.qris_fee && SETTINGS.qris_fee.pct) || 0;
+  const payments = online ? [] : POS.pay.lines.filter(l => l.amount > 0).map(l => ({
+    method: l.method,
+    amount: Number(l.amount),
+    qris_fee: l.method === 'qris' ? Math.round(Number(l.amount) * qfPct / 100) : 0,
+    ref: l.ref || null
+  }));
+  
   msg('pay-msg','Memproses...','');
+  
   const {data,error}=await sb.rpc('process_sale',{
-    p_order:POS.orderId,p_member:POS.member?POS.member.id:null,p_sales_type:o.sales_type,p_items:items,
-    p_breakdown:{subtotal:t.subtotal,discount_promo:t.discount_promo,discount_member:t.discount_member,voucher:t.voucher,service:t.service,pb1:t.pb1,delivery_fee:t.delivery_fee||0,rounding:t.rounding,total:t.total},
-    p_payments:payments,p_voucher_note:null,p_points_redeemed:t.pointsRedeem,p_points_earned:t.points_earned});
-  if(error){ msg('pay-msg','Gagal: '+error.message,'err'); return; }
-  closeModal(); posPrintInvoice(data,items,t,payments);
-  if(online){ try{ await sb.from('receivables').insert({platform:o.sales_type,invoice_id:data.invoice_id,amount:t.total,status:'open'}); }catch(e){} }
-  POS.orderId=null;POS.order=null;POS.items=[];POS.member=null;
-  renderPosOpen(); renderPosGrid(); renderPosOrder();
+    p_order:POS.orderId,
+    p_member:POS.member?POS.member.id:null,
+    p_sales_type:o.sales_type,
+    p_items:items,
+    p_breakdown:{
+      subtotal:t.subtotal,
+      discount_promo:t.discount_promo,
+      discount_member:t.discount_member,
+      voucher:t.voucher,
+      service:t.service,
+      pb1:t.pb1,
+      delivery_fee:t.delivery_fee||0,
+      rounding:t.rounding,
+      total:t.total
+    },
+    p_payments:payments,
+    p_voucher_note:null,
+    p_points_redeemed:t.pointsRedeem,
+    p_points_earned:t.points_earned
+  });
+  
+  // Cek error SEKALI saja di sini
+  if(error){ 
+    console.error('Process sale error:', error);
+    msg('pay-msg','Gagal: '+error.message,'err'); 
+    return; 
+  }
+  
+  // Sukses - lanjutkan proses
+  closeModal(); 
+  posPrintInvoice(data,items,t,payments);
+  
+  if(online){ 
+    try{ 
+      await sb.from('receivables').insert({
+        platform:o.sales_type,
+        invoice_id:data.invoice_id,
+        amount:t.total,
+        status:'open'
+      }); 
+    }catch(e){} 
+  }
+  
+  // Reset POS
+  POS.orderId=null;
+  POS.order=null;
+  POS.items=[];
+  POS.member=null;
+  
+  // Re-render
+  renderPosOpen(); 
+  renderPosGrid(); 
+  renderPosOrder();
 }
 /* ---- Cetak: ke printer Bluetooth bila di APK + printer dipilih (emitPrint), selain itu via dialog cetak browser ---- */
 function printHTML(html){
