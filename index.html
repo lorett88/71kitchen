@@ -199,7 +199,7 @@ const LS_URL='kit_sb_url', LS_KEY='kit_sb_key';
 const DEFAULT_URL='https://ehorzoooqinfcmgyitju.supabase.co';
 const DEFAULT_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVob3J6b29vcWluZmNtZ3lpdGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjk0MjUsImV4cCI6MjA5ODIwNTQyNX0.Y8ME7LPHgoTayA1CwnC9Q3oXHHNE9G_s_lVHdNkxFPI';
 let sb=null, ME={username:'',role:'',id:''}, SETTINGS={}, POLL=null, SHIFT=null;
-const APP_VER='2026-07-06.15';
+const APP_VER='2026-07-06.16';
 document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VER);});
 /* Tabel responsif otomatis: tiap tabel diberi label kolom agar jadi kartu di layar kecil */
 function rspTables(){
@@ -730,6 +730,8 @@ async function saveSettings(){
 
 /* ==================== KASIR / POS ==================== */
 let POS={products:[],items:[],orderId:null,order:null,member:null,cat:'all',pay:null,cats:['all']};
+let POSBUSY=false;
+async function busyRun(fn){ if(POSBUSY) return; POSBUSY=true; try{ await fn(); } finally { POSBUSY=false; } }
 let PROMOS=[];
 const CHANNELS=[
   {id:'dinein',field:'price_dinein',label:'Harga',type:'Reguler',online:false,base:true},
@@ -787,7 +789,7 @@ async function posNewOrder(){
    ${field('Nama customer (opsional)',`<input id="po_cust">`)}
    ${field('No HP member (opsional)',`<input id="po_member" placeholder="08..." onchange="posMemberLookup()">`)}
    <div id="po-msg" class="msg"></div>
-   <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="posCreateOrder()">Buka pesanan</button></div>`);
+   <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="busyRun(posCreateOrder)">Buka pesanan</button></div>`);
 }
 async function posMemberLookup(){
   const phone=document.getElementById('po_member').value.trim();
@@ -915,7 +917,7 @@ function renderPosOrder(){
   const t=computeTotals();
   el.innerHTML=head+rows+
     `<div style="display:flex;justify-content:space-between;margin-top:10px;font-weight:600"><span>Subtotal</span><span>${rp(t.subtotal)}</span></div>
-     <div style="display:flex;gap:8px;margin-top:12px"><button class="btn sec" style="flex:1" onclick="posSendKitchen()">Kirim ke Dapur</button><button class="btn" style="flex:1" onclick="posPay()">Bayar</button></div>
+     <div style="display:flex;gap:8px;margin-top:12px"><button class="btn sec" style="flex:1" onclick="busyRun(posSendKitchen)">Kirim ke Dapur</button><button class="btn" style="flex:1" onclick="posPay()">Bayar</button></div>
      <button class="btn ghost sm" style="width:100%;margin-top:8px" onclick="posPrintOrder()">Cetak nota pesanan</button>`;
 }
 async function posSendKitchen(){
@@ -962,7 +964,7 @@ function renderPay(){
     ${L('Dibayar',rp(paid))}${L(change>=0?'Kembali':'Kurang',(change<0?'−':'')+rp(Math.abs(change)))}`}
     <div id="pay-msg" class="msg"></div>
     <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Batal</button>
-    <button class="btn" onclick="posConfirmPay()" ${(!online&&paid<t.total)?'disabled':''}>Selesaikan & Bayar</button></div>`;
+    <button class="btn" onclick="busyRun(posConfirmPay)" ${(!online&&paid<t.total)?'disabled':''}>Selesaikan & Bayar</button></div>`;
 }
 async function posConfirmPay(){
   if(!(await ensureShiftOpen())){ msg('pay-msg','Shift sudah ditutup (mungkin oleh manager). Buka shift baru sebelum melanjutkan transaksi.','err'); return; }
