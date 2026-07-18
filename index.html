@@ -199,7 +199,7 @@ const LS_URL='kit_sb_url', LS_KEY='kit_sb_key';
 const DEFAULT_URL='https://ehorzoooqinfcmgyitju.supabase.co';
 const DEFAULT_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVob3J6b29vcWluZmNtZ3lpdGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2Mjk0MjUsImV4cCI6MjA5ODIwNTQyNX0.Y8ME7LPHgoTayA1CwnC9Q3oXHHNE9G_s_lVHdNkxFPI';
 let sb=null, ME={username:'',role:'',id:''}, SETTINGS={}, POLL=null, SHIFT=null;
-const APP_VER='2026-07-06.16';
+const APP_VER='2026-07-06.17';
 document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.appver').forEach(e=>e.textContent=APP_VER);});
 /* Tabel responsif otomatis: tiap tabel diberi label kolom agar jadi kartu di layar kecil */
 function rspTables(){
@@ -279,6 +279,7 @@ const MENU=[
   {id:'kitchen',label:'Dapur',roles:['owner','manager','dapur']},
   {id:'booking',label:'Booking',roles:['owner','manager','kasir']},
   {id:'shift',label:'Shift Kasir',roles:['owner','manager','kasir']},
+  {id:'history',label:'Riwayat Transaksi',roles:['owner','manager','kasir','admin']},
   {grp:'Master Data'},
   {id:'product',label:'Produk',roles:['owner','manager']},
   {id:'raw',label:'Bahan Baku',roles:['owner','manager','admin']},
@@ -320,7 +321,7 @@ function go(id){
   if(item.soon){ c.innerHTML=`<div class="soon-box"><div class="big">${item.label}</div>Modul ini dibangun di iterasi berikutnya (Tahap 1 stage 2-3 & Tahap 2).</div>`; return; }
   ({dashboard:viewDashboard,pos:viewPOS,product:()=>crud(CFG.product),raw:()=>crud(CFG.raw),
     seasoning:()=>crud(CFG.seasoning),member:()=>crud(CFG.member),supplier:()=>crud(CFG.supplier),promo:()=>crud(CFG.promo),tier:()=>crud(CFG.tier),import:viewImport,settings:viewSettings,printer:viewPrinter,
-    purchase:viewPurchase,expense:viewExpense,income:viewIncome,opname:viewOpname,cash:viewCash,kitchen:viewKitchen,booking:viewBooking,report:viewReport,backup:viewBackup,shift:viewShift}[id]||(()=>c.innerHTML=''))();
+    purchase:viewPurchase,expense:viewExpense,income:viewIncome,opname:viewOpname,cash:viewCash,kitchen:viewKitchen,booking:viewBooking,report:viewReport,backup:viewBackup,shift:viewShift,history:viewHistory}[id]||(()=>c.innerHTML=''))();
 }
 
 /* ---------- Helpers ---------- */
@@ -927,6 +928,94 @@ async function posSendKitchen(){
   if(error){ alert('Gagal kirim: '+error.message); return; }
   POS.items.forEach(i=>i.sent=true); renderPosOrder(); posPrintTickets(data||[],unsent);
 }
+async function posPayAttachMember(){
+  const el=document.getElementById('pp_phone'); const phone=el?el.value.trim():'';
+  if(!phone){ msg('pay-msg','Isi nomor HP member dulu.','err'); return; }
+  const {data}=await sb.from('members').select('id,name,phone,points,tier:membership_tiers(discount_pct,name)').eq('phone',phone).maybeSingle();
+  if(!data){ msg('pay-msg','Nomor member tidak ditemukan.','err'); return; }
+  POS.member=data;
+  try{ await sb.from('orders').update({member_id:data.id}).eq('id',POS.orderId); }catch(e){}
+  renderPay();
+}
+async function posPayClearMember(){
+  POS.member=null;
+  try{ await sb.from('orders').update({member_id:null}).eq('id',POS.orderId); }catch(e){}
+  renderPay();
+}
+const RL2=(l,v)=>`<div style="display:flex;justify-content:space-between;font-size:13px;margin:2px 0"><span>${l}</span><span>${v}</span></div>`;
+async function viewHistory(){
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('content').innerHTML=`<div class="pagehead"><h2>Riwayat Transaksi</h2></div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+     <input id="rh_from" type="date" value="${today}" style="width:auto">
+     <input id="rh_to" type="date" value="${today}" style="width:auto">
+     <select id="rh_type" style="width:auto"><option value="all">Semua tipe</option>${CHANNELS.map(c=>`<option value="${c.id}">${c.type}</option>`).join('')}</select>
+     <button class="btn sec" onclick="rhLoad()">Tampilkan</button>
+   </div>
+   <input id="rh_q" placeholder="Cari No Nota / meja / nama customer..." style="margin-bottom:10px" oninput="rhFilter()">
+   <div class="panel" id="rh-list"><div class="empty">Memuat...</div></div>`;
+  rhLoad();
+}
+let RH=[];
+async function rhLoad(){
+  const from=document.getElementById('rh_from').value, to=document.getElementById('rh_to').value, type=document.getElementById('rh_type').value;
+  const box=document.getElementById('rh-list'); box.innerHTML='<div class="empty">Memuat...</div>';
+  let q=sb.from('invoices').select('id,invoice_no,sales_type,total,status,created_at,created_by:app_users(username),order:orders(table_no,customer_name),member:members(name)')
+    .gte('created_at',from+'T00:00:00').lte('created_at',to+'T23:59:59').order('created_at',{ascending:false}).limit(300);
+  if(type!=='all') q=q.eq('sales_type',type);
+  const {data,error}=await q;
+  if(error){ box.innerHTML='<div class="empty">Gagal memuat: '+esc(error.message)+'</div>'; return; }
+  RH=data||[]; rhFilter();
+}
+function rhFilter(){
+  const box=document.getElementById('rh-list'); if(!box)return;
+  const qv=(document.getElementById('rh_q').value||'').trim().toLowerCase();
+  const rows=RH.filter(r=>{ if(!qv)return true; const lbl=(r.order&&(r.order.table_no||r.order.customer_name))||''; return String(r.invoice_no).toLowerCase().includes(qv)||String(lbl).toLowerCase().includes(qv); });
+  if(!RH.length){ box.innerHTML='<div class="empty">Tidak ada transaksi pada periode ini.</div>'; return; }
+  if(!rows.length){ box.innerHTML='<div class="empty">Tidak ada yang cocok dengan pencarian.</div>'; return; }
+  box.innerHTML=rows.map(r=>{
+    const lbl=(r.order&&(r.order.table_no?('Meja '+r.order.table_no):r.order.customer_name))||'';
+    return `<div class="lrow" style="cursor:pointer" onclick="invDetail('${r.id}')"><div class="lmain"><div class="lname">${esc(r.invoice_no)} <span class="pill" style="font-size:10px">${posTypeLabel(r.sales_type)}</span>${r.status==='void'?' <span class="pill bad" style="font-size:10px">Void</span>':''}</div>
+      <div class="lmeta">${new Date(r.created_at).toLocaleString('id-ID')}${lbl?(' \u00b7 '+esc(lbl)):''}${r.member?(' \u00b7 '+esc(r.member.name)):''} \u00b7 kasir ${esc(r.created_by?r.created_by.username:'-')}</div></div>
+      <div class="lright"><div class="lprice">${rp(r.total)}</div></div></div>`;
+  }).join('');
+}
+async function invDetail(id){
+  const {data:inv}=await sb.from('invoices').select('*, order:orders(table_no,customer_name,sales_type,guests_adult,guests_child), member:members(name,phone), created_by:app_users(username)').eq('id',id).single();
+  if(!inv){ alert('Data tidak ditemukan.'); return; }
+  const {data:items}=await sb.from('invoice_items').select('*').eq('invoice_id',id).order('id');
+  const {data:pays}=await sb.from('payments').select('*').eq('invoice_id',id).order('created_at');
+  const o=inv.order||{};
+  const h=`<h2 style="margin-bottom:4px">${esc(inv.invoice_no)}</h2>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${new Date(inv.created_at).toLocaleString('id-ID')} \u00b7 ${posTypeLabel(inv.sales_type)}${inv.status==='void'?' \u00b7 <span style="color:var(--danger)">VOID</span>':''}<br>
+    ${o.table_no?('Meja '+esc(o.table_no)):esc(o.customer_name||'-')}${(o.guests_adult||o.guests_child)?(' \u00b7 Tamu '+(o.guests_adult||0)+' dws'+(o.guests_child?(' + '+o.guests_child+' anak'):'')):''}${inv.member?(' \u00b7 Member: '+esc(inv.member.name)):''} \u00b7 Kasir: ${esc(inv.created_by?inv.created_by.username:'-')}</div>
+    <div style="border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px 0;margin-bottom:8px">
+    ${(items||[]).map(i=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>${esc(i.name)} <span style="color:var(--muted)">\u00d7${fmtn(i.qty)}</span></span><span>${rp(i.subtotal)}</span></div>`).join('')||'<div class="empty">Tidak ada item.</div>'}
+    </div>
+    ${RL2('Subtotal',rp(inv.subtotal))}
+    ${inv.discount_promo?RL2('Diskon Promo','-'+rp(inv.discount_promo)):''}
+    ${inv.discount_member?RL2('Diskon Member','-'+rp(inv.discount_member)):''}
+    ${inv.voucher?RL2('Voucher','-'+rp(inv.voucher)):''}
+    ${inv.points_redeemed?RL2('Poin ditukar',fmtn(inv.points_redeemed)):''}
+    ${inv.service?RL2('Service',rp(inv.service)):''}
+    ${inv.pb1?RL2('PB1',rp(inv.pb1)):''}
+    ${inv.delivery_fee?RL2('Ongkos kirim',rp(inv.delivery_fee)):''}
+    ${inv.rounding?RL2('Pembulatan',rp(inv.rounding)):''}
+    <div style="display:flex;justify-content:space-between;font-weight:700;font-size:15px;margin:8px 0 10px;border-top:1px solid var(--line);padding-top:6px"><span>TOTAL</span><span>${rp(inv.total)}</span></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Pembayaran</div>
+    ${(pays||[]).map(p=>RL2(p.method.toUpperCase(),rp(p.amount))).join('')||'<div class="empty">Tidak ada catatan pembayaran.</div>'}
+    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Tutup</button><button class="btn sec" onclick="invReprint('${inv.id}')">Cetak ulang</button></div>`;
+  openModal(h);
+}
+async function invReprint(id){
+  const {data:inv}=await sb.from('invoices').select('*').eq('id',id).single();
+  if(!inv)return;
+  const {data:items}=await sb.from('invoice_items').select('*').eq('invoice_id',id).order('id');
+  const {data:pays}=await sb.from('payments').select('*').eq('invoice_id',id).order('created_at');
+  const t={subtotal:inv.subtotal,discount_promo:inv.discount_promo,discount_member:inv.discount_member,voucher:inv.voucher,points_value:0,service:inv.service,pb1:inv.pb1,delivery_fee:inv.delivery_fee||0,rounding:inv.rounding,total:inv.total,sales_type:inv.sales_type,points_earned:0};
+  const mapped=(items||[]).map(i=>({name:i.name,qty:i.qty,unit_price:i.unit_price,subtotal:i.subtotal}));
+  posPrintInvoice(inv,mapped,t,(pays||[]).map(p=>({method:p.method,amount:p.amount})),0,true);
+}
 function posPay(){
   if(!POS.items.length){ alert('Belum ada item.'); return; }
   POS.pay={voucher:0,pointsRedeem:0,delivFee:null,lines:[{method:'tunai',amount:0}]};
@@ -936,6 +1025,11 @@ function renderPay(){
   const o=POS.order, online=isOnlineType(o.sales_type), isDO=o.sales_type==='delivery';
   const t=computeTotals({voucher:POS.pay.voucher,pointsRedeem:POS.pay.pointsRedeem,delivFee:POS.pay.delivFee});
   const paid=POS.pay.lines.reduce((s,l)=>s+Number(l.amount||0),0), change=paid-t.total;
+  const memberBox=online?'':(POS.member?
+    `<div style="display:flex;justify-content:space-between;align-items:center;background:#eef4f2;border-radius:8px;padding:7px 10px;font-size:12.5px;margin-bottom:8px">
+       <span>Member: <b>${esc(POS.member.name||POS.member.phone)}</b>${POS.member.tier?(' · '+esc(POS.member.tier.name)+(POS.member.tier.discount_pct?(' ('+POS.member.tier.discount_pct+'% off)'):'')):' · belum ada diskon tier'}</span>
+       <a href="#" onclick="posPayClearMember();return false" style="color:var(--danger)">hapus</a></div>`
+    :`<div style="display:flex;gap:6px;margin-bottom:8px"><input id="pp_phone" placeholder="No HP member (opsional, untuk diskon)" style="flex:1"><button class="btn sec sm" onclick="posPayAttachMember()">Terapkan</button></div>`);
   const L=(l,v,b)=>`<div style="display:flex;justify-content:space-between;${b?'font-weight:600;font-size:16px;':'font-size:13px;color:var(--muted);'}margin:3px 0"><span>${l}</span><span>${v}</span></div>`;
   const row=(l,idx)=>`<div style="display:flex;gap:8px;margin-bottom:6px">
     <select onchange="POS.pay.lines[${idx}].method=this.value;renderPay()" style="flex:1">
@@ -943,6 +1037,7 @@ function renderPay(){
     <input type="text" inputmode="numeric" value="${l.amount||''}" placeholder="Jumlah" style="flex:1" onchange="POS.pay.lines[${idx}].amount=Number(this.value)||0;renderPay()">
     ${POS.pay.lines.length>1?`<button class="btn ghost sm" onclick="POS.pay.lines.splice(${idx},1);renderPay()">✕</button>`:''}</div>`;
   document.getElementById('pay-body').innerHTML=`<h2 style="margin-bottom:12px">Pembayaran</h2>
+    ${memberBox}
     ${L('Subtotal',rp(t.subtotal))}
     ${t.discount_promo?L('Diskon Promo','−'+rp(t.discount_promo)):''}
     ${t.discount_member?L('Diskon Membership','−'+rp(t.discount_member)):''}
@@ -984,13 +1079,14 @@ async function posConfirmPay(){
     payLines=payLines.filter(l=>l.amount>0);
   }
   const payments=payLines.map(l=>({method:l.method,amount:l.amount,qris_fee:l.method==='qris'?Math.round(l.amount*qfPct/100):0}));
+  const change=online?0:Math.max(0,POS.pay.lines.reduce((s,l)=>s+Number(l.amount||0),0)-t.total);
   msg('pay-msg','Memproses...','');
   const {data,error}=await sb.rpc('process_sale',{
     p_order:POS.orderId,p_member:POS.member?POS.member.id:null,p_sales_type:o.sales_type,p_items:items,
     p_breakdown:{subtotal:t.subtotal,discount_promo:t.discount_promo,discount_member:t.discount_member,voucher:t.voucher,service:t.service,pb1:t.pb1,delivery_fee:t.delivery_fee||0,rounding:t.rounding,total:t.total},
     p_payments:payments,p_voucher_note:null,p_points_redeemed:t.pointsRedeem,p_points_earned:t.points_earned});
   if(error){ msg('pay-msg','Gagal: '+error.message,'err'); return; }
-  closeModal(); posPrintInvoice(data,items,t,payments);
+  closeModal(); posPrintInvoice(data,items,t,payments,change);
   if(online){ try{ await sb.from('receivables').insert({platform:o.sales_type,invoice_id:data.invoice_id,amount:t.total,status:'open'}); }catch(e){} }
   POS.orderId=null;POS.order=null;POS.items=[];POS.member=null;
   renderPosOpen(); renderPosGrid(); renderPosOrder();
@@ -1005,7 +1101,8 @@ function printHTML(html){
 const outletHTML=()=>{const o=SETTINGS.outlet||{};return `<div class="c"><b>${esc(o.name||'71 Kitchen')}</b></div><div class="c" style="font-size:11px">${esc(o.address||'')}</div><div class="c" style="font-size:11px">${esc(o.phone||'')}</div>`;};
 const itemsHTML=its=>its.map(i=>`<div>${esc(i.name)}</div><div class="r"><span>${i.qty} × ${rp(i.unit_price)}</span><span>${rp(i.subtotal)}</span></div>`).join('');
 const RL=(l,v)=>`<div class="r"><span>${l}</span><span>${v}</span></div>`;
-function posPrintInvoice(res,items,t,payments){
+function posPrintInvoice(res,items,t,payments,change,isReprint){
+  change=change||0;
   const no=(res&&res.invoice_no)||'';
   let h=outletHTML()+'<hr>'+RL('No Nota',no)+RL('Kasir',esc(ME.username))+RL('Tipe',posTypeLabel(t.sales_type))+'<div class="b"></div>'+itemsHTML(items)+'<div class="b"></div>'+RL('Subtotal',rp(t.subtotal));
   if(t.discount_promo)h+=RL('Diskon Promo','-'+rp(t.discount_promo));
@@ -1017,11 +1114,11 @@ function posPrintInvoice(res,items,t,payments){
   if(t.delivery_fee)h+=RL('Ongkos kirim',rp(t.delivery_fee));
   if(t.rounding)h+=RL('Pembulatan',(t.rounding<0?'-':'')+rp(Math.abs(t.rounding)));
   h+='<hr><div class="r" style="font-weight:bold"><span>TOTAL</span><span>'+rp(t.total)+'</span></div>';
-  const paid=payments.reduce((s,p)=>s+Number(p.amount),0);
   payments.forEach(p=>h+=RL(p.method.toUpperCase(),rp(p.amount)));
-  if(paid>t.total)h+=RL('Kembali',rp(paid-t.total));
+  if(change>0)h+=RL('Kembali',rp(change));
   if(t.points_earned)h+=RL('Poin didapat','+'+t.points_earned);
-  h+=((SETTINGS.points&&SETTINGS.points.policy)?'<div class="c" style="font-size:10px;margin-top:6px;white-space:pre-wrap">'+esc(SETTINGS.points.policy)+'</div>':'')+'<div class="b"></div><div class="c">Terima kasih</div>'; emitPrint(h,tInvoice(res,items,t,payments));
+  if(isReprint)h+='<div class="c" style="font-size:10px;margin-top:4px">(cetak ulang)</div>';
+  h+=((SETTINGS.points&&SETTINGS.points.policy)?'<div class="c" style="font-size:10px;margin-top:6px;white-space:pre-wrap">'+esc(SETTINGS.points.policy)+'</div>':'')+'<div class="b"></div><div class="c">Terima kasih</div>'; emitPrint(h,tInvoice(res,items,t,payments,change,isReprint));
 }
 function posPrintOrder(){
   const t=computeTotals(); const pf=posPriceField(POS.order.sales_type);
@@ -1128,7 +1225,8 @@ function rawbtPrint(text){
   const plain=tPlain(text)+'\n\n\n';
   location.href='intent:'+encodeURIComponent(plain)+'#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
 }
-function tInvoice(res,items,t,payments){
+function tInvoice(res,items,t,payments,change,isReprint){
+  change=change||0;
   const no=(res&&res.invoice_no)||'';
   let s=tOutlet()+tDiv()+tLR('No Nota',String(no))+tLR('Kasir',tEsc(ME.username))+tLR('Tipe',posTypeLabel(t.sales_type))+tDiv()+tItems(items)+tDiv()+tLR('Subtotal',rp(t.subtotal));
   if(t.discount_promo)s+=tLR('Diskon Promo','-'+rp(t.discount_promo));
@@ -1140,10 +1238,10 @@ function tInvoice(res,items,t,payments){
   if(t.delivery_fee)s+=tLR('Ongkir',rp(t.delivery_fee));
   if(t.rounding)s+=tLR('Pembulatan',(t.rounding<0?'-':'')+rp(Math.abs(t.rounding)));
   s+=tDiv()+'[L]<b>TOTAL</b>[R]<b>'+rp(t.total)+'</b>\n';
-  const paid=(payments||[]).reduce((a,p)=>a+Number(p.amount),0);
   (payments||[]).forEach(p=>s+=tLR(p.method.toUpperCase(),rp(p.amount)));
-  if(paid>t.total)s+=tLR('Kembali',rp(paid-t.total));
+  if(change>0)s+=tLR('Kembali',rp(change));
   if(t.points_earned)s+=tLR('Poin didapat','+'+t.points_earned);
+  if(isReprint)s+=tC('(cetak ulang)');
   return s+((SETTINGS.points&&SETTINGS.points.policy)?tDiv()+tL(tEsc(SETTINGS.points.policy)):'')+tDiv()+tC('Terima kasih');
 }
 function tOrder(t,items){
